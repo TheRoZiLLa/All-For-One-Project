@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -89,21 +89,35 @@ namespace Recorded.Weapons.Ammo
 
         /// <summary>
         /// Constructs the layered uGUI hierarchy:
-        /// 1. Stationary Outer Housing & 12 o'clock Firing Indicator.
+        /// 1. Stationary Outer Housing & 6 o'clock Firing Indicator.
         /// 2. Rotating Inner Cylinder with 6 Chamber slots and Center Hub.
         /// </summary>
         public void BuildHUDHierarchy()
         {
-            if (_rootContainer != null) return; // Already built
+            if (_rootContainer != null && _chamberVisuals != null && _chamberVisuals.Length == CylinderAmmoController.CylinderCapacity && _chamberVisuals[0].root != null)
+            {
+                return; // Already built and valid in this session
+            }
 
-            // 1. Ensure Canvas exists
+            // 1. Ensure fresh Canvas
             Canvas canvas = GetComponentInParent<Canvas>();
             if (canvas == null)
             {
-                Transform existingCanvas = transform.Find("CylinderAmmo_Canvas");
-                if (existingCanvas != null)
+                for (int c = transform.childCount - 1; c >= 0; c--)
                 {
-                    DestroyImmediate(existingCanvas.gameObject);
+                    Transform child = transform.GetChild(c);
+                    if (child.name == "CylinderAmmo_Canvas")
+                    {
+                        if (Application.isPlaying)
+                        {
+                            child.gameObject.SetActive(false);
+                            Destroy(child.gameObject);
+                        }
+                        else
+                        {
+                            DestroyImmediate(child.gameObject);
+                        }
+                    }
                 }
 
                 GameObject canvasObj = new GameObject("CylinderAmmo_Canvas");
@@ -138,7 +152,7 @@ namespace Recorded.Weapons.Ammo
             // 4. Rotating Inner Cylinder
             BuildRotatingInnerCylinder(_rootContainer);
 
-            // 5. Stationary 12 O'Clock Firing Indicator (Renders on top of inner cylinder pointing DOWN into top chamber)
+            // 5. Stationary 6 O'Clock Firing Indicator (Renders on top of inner cylinder pointing UP into bottom chamber)
             BuildStationaryFiringIndicator(_rootContainer);
 
             // Connect rotating rect to rotation controller
@@ -200,11 +214,11 @@ namespace Recorded.Weapons.Ammo
             float chamberRadius = hudDiameter * 0.28f; // Distance from center to chamber centers
             float chamberSize = hudDiameter * 0.24f;   // Diameter of each chamber
 
-            // 6 Chambers: Chamber 0 starts at 0 deg (12 o'clock top)
-            // Subsequent chambers: Index 1 = 60° (2 o'clock), 2 = 120° (4 o'clock), 3 = 180° (6 o'clock), 4 = 240° (8 o'clock), 5 = 300° (10 o'clock)
+            // 6 Chambers: Chamber 0 starts at 180 deg (6 o'clock bottom)
+            // Subsequent chambers: Index 1 = 120° (4 o'clock), 2 = 60° (2 o'clock), 3 = 0° (12 o'clock), 4 = 300° (10 o'clock), 5 = 240° (8 o'clock)
             for (int i = 0; i < CylinderAmmoController.CylinderCapacity; i++)
             {
-                float angleDeg = i * 60f;
+                float angleDeg = 180f - (i * 60f);
                 float rad = angleDeg * Mathf.Deg2Rad;
                 Vector2 pos = new Vector2(Mathf.Sin(rad) * chamberRadius, Mathf.Cos(rad) * chamberRadius);
 
@@ -302,19 +316,19 @@ namespace Recorded.Weapons.Ammo
 
         private void BuildStationaryFiringIndicator(RectTransform parent)
         {
-            // Fixed Firing Position Indicator at 12 O'Clock (Top)
-            // Points downward toward the 12 o'clock chamber!
-            GameObject indicatorObj = new GameObject("Stationary_12oclock_FiringIndicator");
+            // Fixed Firing Position Indicator at 6 O'Clock (Bottom)
+            // Points upward toward the 6 o'clock active chamber
+            GameObject indicatorObj = new GameObject("Stationary_6oclock_FiringIndicator");
             indicatorObj.transform.SetParent(parent, false);
 
             RectTransform indRt = indicatorObj.AddComponent<RectTransform>();
-            indRt.anchorMin = new Vector2(0.5f, 1f);
-            indRt.anchorMax = new Vector2(0.5f, 1f);
+            indRt.anchorMin = new Vector2(0.5f, 0f);
+            indRt.anchorMax = new Vector2(0.5f, 0f);
             indRt.pivot = new Vector2(0.5f, 0.5f);
-            // Placed at the top edge, pointing down into the 12 o'clock chamber
-            indRt.anchoredPosition = new Vector2(0f, -hudDiameter * 0.065f);
+            // Placed at the bottom edge, pointing up into the 6 o'clock chamber
+            indRt.anchoredPosition = new Vector2(0f, hudDiameter * 0.065f);
             indRt.sizeDelta = new Vector2(hudDiameter * 0.12f, hudDiameter * 0.12f);
-            indRt.localRotation = Quaternion.Euler(0f, 0f, 180f); // Rotate 180 deg to point downward
+            indRt.localRotation = Quaternion.identity;
 
             Image indImg = indicatorObj.AddComponent<Image>();
             indImg.sprite = CylinderUISpriteFactory.IndicatorNotch;

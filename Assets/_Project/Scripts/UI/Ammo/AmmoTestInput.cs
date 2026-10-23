@@ -7,8 +7,8 @@ namespace Recorded.Weapons.Ammo
     /// Temporary test input component for the Cylinder Ammo prototype.
     /// Handles:
     /// - 'R': Unlimited test reload with randomized RED, GREEN, and CYAN distribution.
-    /// - 'Q' / 'E' or Mouse Scroll: Manual rotation of the cylinder.
-    /// - Fire (Left Click / Space): Consumes the 12 o'clock round and auto-advances the cylinder.
+    /// - 'Q' / 'E' or Mouse Scroll: Manual rotation of the cylinder (when standalone without SpectrumGunController).
+    /// - Fire (Left Click / Space): Consumes the 6 o'clock round and auto-advances the cylinder (when standalone).
     /// 
     /// SEPARATION NOTICE:
     /// This component is completely decoupled from the core ammunition data model.
@@ -22,8 +22,10 @@ namespace Recorded.Weapons.Ammo
         [SerializeField] private CylinderRotationController rotationController;
 
         [Header("Test Firing Controls")]
-        [Tooltip("If true, pressing left click or space triggers test firing and auto-advancement.")]
+        [Tooltip("If true, pressing left click or space triggers test firing and auto-advancement when no SpectrumGunController is present.")]
         [SerializeField] private bool enableTestFiring = true;
+
+        private SpectrumGunController _cachedGunController;
 
         private void Awake()
         {
@@ -38,10 +40,28 @@ namespace Recorded.Weapons.Ammo
             }
         }
 
+        private void Start()
+        {
+            _cachedGunController = FindFirstObjectByType<SpectrumGunController>();
+        }
+
         private void Update()
         {
-            HandleRotationInput();
+            // Always allow R test reload through AmmoTestInput (the dedicated temporary reload component)
             HandleReloadInput();
+
+            if (_cachedGunController == null)
+            {
+                _cachedGunController = FindFirstObjectByType<SpectrumGunController>();
+            }
+
+            // If SpectrumGunController is active in the scene, let it handle Q/E/Scroll rotation and weapon firing
+            if (_cachedGunController != null && _cachedGunController.isActiveAndEnabled)
+            {
+                return;
+            }
+
+            HandleRotationInput();
 
             if (enableTestFiring)
             {
@@ -56,13 +76,13 @@ namespace Recorded.Weapons.Ammo
             // 1. Keyboard Q / E
             if (Keyboard.current != null)
             {
-                // Q = Rotate Left (Previous Chamber)
+                // Q = Rotate Left
                 if (Keyboard.current.qKey.wasPressedThisFrame)
                 {
                     rotationController.RotateLeft();
                     return;
                 }
-                // E = Rotate Right (Next Chamber)
+                // E = Rotate Right
                 else if (Keyboard.current.eKey.wasPressedThisFrame)
                 {
                     rotationController.RotateRight();
@@ -76,11 +96,11 @@ namespace Recorded.Weapons.Ammo
                 float scrollY = Mouse.current.scroll.ReadValue().y;
                 if (scrollY > 0.1f)
                 {
-                    rotationController.RotateLeft(); // Scroll UP -> Previous
+                    rotationController.RotateLeft();
                 }
                 else if (scrollY < -0.1f)
                 {
-                    rotationController.RotateRight(); // Scroll DOWN -> Next
+                    rotationController.RotateRight();
                 }
             }
         }
@@ -98,12 +118,6 @@ namespace Recorded.Weapons.Ammo
 
         private void HandleTestFireInput()
         {
-            // If SpectrumGunController is active in the scene, let it manage actual weapon firing and ammo consumption
-            if (FindFirstObjectByType<SpectrumGunController>() != null)
-            {
-                return;
-            }
-
             if (ammoController == null || rotationController == null) return;
             if (rotationController.IsRotating) return; // Prevent firing while cylinder is mid-rotation
 
@@ -119,13 +133,13 @@ namespace Recorded.Weapons.Ammo
 
             if (!firePressed) return;
 
-            // Attempt to fire the round at the 12 o'clock firing position
+            // Attempt to fire the round at the 6 o'clock firing position
             if (ammoController.HasActiveRound)
             {
                 if (ammoController.TryConsumeActiveRound(out AmmoType firedType))
                 {
                     Color logColor = GetLogColor(firedType);
-                    Debug.Log($"<color=#{ColorUtility.ToHtmlStringRGB(logColor)}><b>[AmmoTestInput]</b> Fired <b>{firedType.ToString().ToUpper()}</b> round from 12 o'clock chamber! Auto-advancing cylinder...</color>");
+                    Debug.Log($"<color=#{ColorUtility.ToHtmlStringRGB(logColor)}><b>[AmmoTestInput]</b> Fired <b>{firedType.ToString().ToUpper()}</b> round from 6 o'clock chamber! Auto-advancing cylinder...</color>");
 
                     // Automatically advance the cylinder to the next chamber following a successful shot
                     rotationController.AutoAdvance();
@@ -133,8 +147,8 @@ namespace Recorded.Weapons.Ammo
             }
             else
             {
-                // Dry fire: Chamber at 12 o'clock is empty
-                Debug.Log("<color=#888888><b>[AmmoTestInput]</b> *CLICK* (Dry Fire) - 12 o'clock chamber is EMPTY. No shot fired, cylinder does not advance.</color>");
+                // Dry fire: Chamber at 6 o'clock is empty
+                Debug.Log("<color=#888888><b>[AmmoTestInput]</b> *CLICK* (Dry Fire) - 6 o'clock chamber is EMPTY. No shot fired, cylinder does not advance.</color>");
             }
         }
 

@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
+using Recorded.ColorSystem;
 
 namespace Recorded.Weapons
 {
@@ -21,6 +22,7 @@ namespace Recorded.Weapons
         [SerializeField] private RaycastWeapon raycastWeapon;
         [SerializeField] private WeaponImpactFeedback impactFeedback;
         [SerializeField] private Renderer rgbCoreRenderer;
+        [SerializeField] private Light chamberGlowLight;
         [SerializeField] private UI.CrosshairUI crosshairUI;
 
         [Header("Ammunition System Integration")]
@@ -200,11 +202,15 @@ namespace Recorded.Weapons
                 }
             }
 
-            // Test reload (R key)
+            // Fallback Test reload (R key) only if AmmoTestInput is not active on the ammo controller
             if (ammoController != null && Keyboard.current != null && Keyboard.current.rKey.wasPressedThisFrame)
             {
-                ammoController.TestReloadRandom();
-                Debug.Log("<color=#FFE84D><b>[Spectrum Gun]</b> Test Reload (R): Filled all 6 chambers with randomized RED, GREEN, CYAN distribution.</color>");
+                var dedicatedTestInput = ammoController.GetComponent<Ammo.AmmoTestInput>();
+                if (dedicatedTestInput == null || !dedicatedTestInput.isActiveAndEnabled)
+                {
+                    ammoController.TestReloadRandom();
+                    Debug.Log("<color=#FFE84D><b>[Spectrum Gun]</b> Test Reload (R): Filled all 6 chambers with randomized RED, GREEN, CYAN distribution.</color>");
+                }
             }
         }
 
@@ -238,7 +244,7 @@ namespace Recorded.Weapons
         }
 
         /// <summary>
-        /// Execute shot if cooldown has elapsed and cylinder has ammo at the 12 o'clock firing position.
+        /// Execute shot if cooldown has elapsed and cylinder has ammo at the 6 o'clock firing position.
         /// Consumes the round, fires raycast with matching color, and auto-advances the cylinder.
         /// </summary>
         public bool AttemptFire()
@@ -255,8 +261,8 @@ namespace Recorded.Weapons
             {
                 if (!ammoController.HasActiveRound)
                 {
-                    // Dry fire: Chamber at 12 o'clock is empty
-                    Debug.Log("<color=#888888><b>[Spectrum Gun]</b> *CLICK* (Dry Fire) - 12 o'clock chamber is EMPTY. No shot fired, cylinder does not advance.</color>");
+                    // Dry fire: Chamber at 6 o'clock is empty
+                    Debug.Log("<color=#888888><b>[Spectrum Gun]</b> *CLICK* (Dry Fire) - 6 o'clock chamber is EMPTY. No shot fired, cylinder does not advance.</color>");
                     _nextFireTime = Time.time + 0.25f; // Short dry-fire debounce
                     return false;
                 }
@@ -274,6 +280,21 @@ namespace Recorded.Weapons
                     impactFeedback.SetFeedbackColor(firedColor);
                 }
 
+                // Map fired ammo type to RGB object color state
+                ObjectColorState shotColorState = ObjectColorState.None;
+                switch (firedAmmo)
+                {
+                    case Ammo.AmmoType.Red:
+                        shotColorState = ObjectColorState.Red;
+                        break;
+                    case Ammo.AmmoType.Green:
+                        shotColorState = ObjectColorState.Green;
+                        break;
+                    case Ammo.AmmoType.Cyan:
+                        shotColorState = ObjectColorState.Blue; // Cyan ammo maps to primary Blue flag
+                        break;
+                }
+
                 if (raycastWeapon != null)
                 {
                     Transform muzzle = raycastWeapon.MuzzlePoint;
@@ -281,20 +302,47 @@ namespace Recorded.Weapons
 
                     bool hit = raycastWeapon.FireRaycast(out RaycastHit hitInfo, out Vector3 targetPoint);
 
-                    if (impactFeedback != null)
+                    if (hit)
                     {
-                        if (hit)
+                        Vector3 shotDir = (hitInfo.point - muzzlePos).sqrMagnitude > 0.0001f
+                            ? (hitInfo.point - muzzlePos).normalized
+                            : transform.forward;
+
+                        // 1. Trigger immediate shot impact effects (e.g., RED Impulse) regardless of duplicate color timer
+                        IColorShotImpact[] shotImpacts = hitInfo.collider.GetComponentsInParent<IColorShotImpact>();
+                        if (shotImpacts != null)
+                        {
+                            for (int i = 0; i < shotImpacts.Length; i++)
+                            {
+                                shotImpacts[i].OnColorShotHit(firedAmmo, shotColorState, hitInfo, shotDir);
+                            }
+                        }
+
+                        // 2. Apply persistent 5-second RGB color state to hit target
+                        if (shotColorState != ObjectColorState.None)
+                        {
+                            IColorReceivable target = hitInfo.collider.GetComponentInParent<IColorReceivable>();
+                            if (target != null)
+                            {
+                                target.ApplyColor(shotColorState);
+                            }
+                        }
+
+                        if (impactFeedback != null)
                         {
                             impactFeedback.PlayHitFeedback(muzzlePos, hitInfo);
                         }
-                        else
+                    }
+                    else
+                    {
+                        if (impactFeedback != null)
                         {
                             impactFeedback.PlayMissFeedback(muzzlePos, targetPoint);
                         }
                     }
                 }
 
-                Debug.Log($"<color=#{ColorUtility.ToHtmlStringRGB(firedColor)}><b>[Spectrum Gun]</b> Fired <b>{firedAmmo.ToString().ToUpper()}</b> round from 12 o'clock chamber! Auto-advancing cylinder...</color>");
+                Debug.Log($"<color=#{ColorUtility.ToHtmlStringRGB(firedColor)}><b>[Spectrum Gun]</b> Fired <b>{firedAmmo.ToString().ToUpper()}</b> round from active chamber! Auto-advancing cylinder...</color>");
 
                 // Automatically advance the cylinder to the next chamber following a successful shot
                 if (rotationController != null)
@@ -310,18 +358,55 @@ namespace Recorded.Weapons
 
             if (raycastWeapon == null) return false;
 
+            ObjectColorState fallbackState = ObjectColorState.None;
+            switch (currentMode)
+            {
+                case SpectrumColorMode.Red: fallbackState = ObjectColorState.Red; break;
+                case SpectrumColorMode.Green: fallbackState = ObjectColorState.Green; break;
+                case SpectrumColorMode.Blue: fallbackState = ObjectColorState.Blue; break;
+            }
+
             Transform fallbackMuzzle = raycastWeapon.MuzzlePoint;
             Vector3 fallbackMuzzlePos = fallbackMuzzle != null ? fallbackMuzzle.position : transform.position;
 
             bool fallbackHit = raycastWeapon.FireRaycast(out RaycastHit fallbackHitInfo, out Vector3 fallbackTargetPoint);
 
-            if (impactFeedback != null)
+            if (fallbackHit)
             {
-                if (fallbackHit)
+                Ammo.AmmoType fallbackAmmo = Ammo.AmmoType.Red;
+                if (currentMode == SpectrumColorMode.Green) fallbackAmmo = Ammo.AmmoType.Green;
+                else if (currentMode == SpectrumColorMode.Blue) fallbackAmmo = Ammo.AmmoType.Cyan;
+
+                Vector3 fallbackShotDir = (fallbackHitInfo.point - fallbackMuzzlePos).sqrMagnitude > 0.0001f
+                    ? (fallbackHitInfo.point - fallbackMuzzlePos).normalized
+                    : transform.forward;
+
+                IColorShotImpact[] shotImpacts = fallbackHitInfo.collider.GetComponentsInParent<IColorShotImpact>();
+                if (shotImpacts != null)
+                {
+                    for (int i = 0; i < shotImpacts.Length; i++)
+                    {
+                        shotImpacts[i].OnColorShotHit(fallbackAmmo, fallbackState, fallbackHitInfo, fallbackShotDir);
+                    }
+                }
+
+                if (fallbackState != ObjectColorState.None)
+                {
+                    IColorReceivable target = fallbackHitInfo.collider.GetComponentInParent<IColorReceivable>();
+                    if (target != null)
+                    {
+                        target.ApplyColor(fallbackState);
+                    }
+                }
+
+                if (impactFeedback != null)
                 {
                     impactFeedback.PlayHitFeedback(fallbackMuzzlePos, fallbackHitInfo);
                 }
-                else
+            }
+            else
+            {
+                if (impactFeedback != null)
                 {
                     impactFeedback.PlayMissFeedback(fallbackMuzzlePos, fallbackTargetPoint);
                 }
@@ -349,7 +434,7 @@ namespace Recorded.Weapons
         }
 
         /// <summary>
-        /// Synchronizes the 3D gun core visual, crosshair color, and impact feedback with the 12 o'clock chamber.
+        /// Synchronizes the 3D gun core visual, crosshair color, and impact feedback with the 6 o'clock chamber.
         /// </summary>
         public void SyncWithActiveChamber()
         {
@@ -401,6 +486,25 @@ namespace Recorded.Weapons
             {
                 crosshairUI.SetCrosshairColor(activeAmmo == Ammo.AmmoType.Empty ? new Color(0.4f, 0.4f, 0.45f, 0.5f) : activeColor);
             }
+
+            // 4. Update Chamber Glow Light
+            if (chamberGlowLight == null)
+            {
+                Transform glowTr = transform.Find("ChamberGlow");
+                if (glowTr != null) chamberGlowLight = glowTr.GetComponent<Light>();
+            }
+            if (chamberGlowLight != null)
+            {
+                if (activeAmmo == Ammo.AmmoType.Empty)
+                {
+                    chamberGlowLight.enabled = false;
+                }
+                else
+                {
+                    chamberGlowLight.enabled = true;
+                    chamberGlowLight.color = activeColor;
+                }
+            }
         }
 
         public void SetColorMode(SpectrumColorMode mode)
@@ -444,6 +548,18 @@ namespace Recorded.Weapons
             if (crosshairUI != null)
             {
                 crosshairUI.SetCrosshairColor(activeColor);
+            }
+
+            // 4. Update Chamber Glow Light
+            if (chamberGlowLight == null)
+            {
+                Transform glowTr = transform.Find("ChamberGlow");
+                if (glowTr != null) chamberGlowLight = glowTr.GetComponent<Light>();
+            }
+            if (chamberGlowLight != null)
+            {
+                chamberGlowLight.enabled = true;
+                chamberGlowLight.color = activeColor;
             }
 
             Debug.Log($"<color=#{ColorUtility.ToHtmlStringRGB(activeColor)}><b>[Spectrum Gun]</b> Switched Mode: {mode.ToString().ToUpper()}</color>");
