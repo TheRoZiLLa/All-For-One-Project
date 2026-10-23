@@ -17,7 +17,7 @@ namespace Recorded.EditorTools
         [MenuItem("RECORDED/Setup Revolver Weapon Model", false, 2)]
         public static void SetupRevolverMenu()
         {
-            SetupRevolverInActiveScene();
+            SetupRevolverInActiveScene(true);
         }
 
         public static GameObject CreateOrUpdateRevolverPrefab()
@@ -61,6 +61,7 @@ namespace Recorded.EditorTools
             }
 
             // Assign materials explicitly
+            MeshRenderer barrelRend = null;
             foreach (var renderer in modelInstance.GetComponentsInChildren<MeshRenderer>(true))
             {
                 if (renderer.gameObject.name.ToLower().Contains("body"))
@@ -69,22 +70,20 @@ namespace Recorded.EditorTools
                 }
                 else if (renderer.gameObject.name.ToLower().Contains("barrel"))
                 {
+                    barrelRend = renderer;
                     if (barrelMat != null) renderer.sharedMaterial = barrelMat;
                 }
             }
 
             // Viewmodel positioning and scaling
-            // Model orientation: rotate by (0, -90, 0) around Y so barrel points forward (+Z) away from player
-            // Handgun dimensions: 3.88cm in raw FBX (imported at 0.01m/unit) -> scale by 8.0f = ~0.31m (31cm length)
             modelInstance.transform.localScale = new Vector3(8.0f, 8.0f, 8.0f);
             modelInstance.transform.localRotation = Quaternion.Euler(0f, -90f, 0f);
             modelInstance.transform.localPosition = Vector3.zero;
 
-            // Muzzle Point & Light setup
+            // Muzzle Point & Light setup at exact front barrel bore tip
             GameObject muzzleObj = new GameObject("MuzzlePoint");
             muzzleObj.transform.SetParent(root.transform, false);
-            // Barrel tip forward along +Z at rot -90: Z ~ 0.09m, Y ~ 0.01m
-            muzzleObj.transform.localPosition = new Vector3(0f, 0.01f, 0.09f);
+            muzzleObj.transform.localPosition = RevolverWeaponBuilder.CalculateBarrelTipLocalPosition(root.transform, barrelRend);
             muzzleObj.transform.localRotation = Quaternion.identity;
 
             Light muzzleLight = muzzleObj.AddComponent<Light>();
@@ -97,7 +96,7 @@ namespace Recorded.EditorTools
             // Dynamic Chamber Glow Indicator inside revolver cylinder
             GameObject chamberLightObj = new GameObject("ChamberGlow");
             chamberLightObj.transform.SetParent(root.transform, false);
-            chamberLightObj.transform.localPosition = new Vector3(0f, 0.035f, -0.02f);
+            chamberLightObj.transform.localPosition = RevolverWeaponBuilder.DefaultChamberGlowLocalPosition;
             Light chamberLight = chamberLightObj.AddComponent<Light>();
             chamberLight.type = LightType.Point;
             chamberLight.range = 0.5f;
@@ -128,7 +127,7 @@ namespace Recorded.EditorTools
 
             // 1. Ensure Prefab exists
             GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(PrefabPath);
-            if (prefab == null)
+            if (prefab == null || force)
             {
                 prefab = CreateOrUpdateRevolverPrefab();
             }
@@ -167,7 +166,7 @@ namespace Recorded.EditorTools
                 return;
             }
 
-            // If already present with RevolverModel of correct scale and not forcing recreation, skip
+            // If already present with RevolverModel of correct scale and not forcing recreation, update its placement & muzzle
             if (!force)
             {
                 SpectrumGunController existing = playerCam.GetComponentInChildren<SpectrumGunController>(true);
@@ -176,6 +175,24 @@ namespace Recorded.EditorTools
                     Transform revModel = existing.transform.Find("RevolverModel");
                     if (revModel != null && revModel.localScale.x >= 1.0f && existing.GetComponentsInChildren<MeshRenderer>(true).Length > 0)
                     {
+                        existing.transform.localPosition = RevolverWeaponBuilder.DefaultViewmodelLocalPosition;
+                        existing.transform.localRotation = Quaternion.Euler(RevolverWeaponBuilder.DefaultViewmodelLocalEuler);
+                        Transform mp = existing.transform.Find("MuzzlePoint");
+                        if (mp != null)
+                        {
+                            MeshRenderer barrelRend = null;
+                            foreach (var r in revModel.GetComponentsInChildren<MeshRenderer>(true))
+                            {
+                                if (r.gameObject.name.ToLower().Contains("barrel")) { barrelRend = r; break; }
+                            }
+                            mp.localPosition = RevolverWeaponBuilder.CalculateBarrelTipLocalPosition(existing.transform, barrelRend);
+                            var rw = existing.GetComponent<RaycastWeapon>();
+                            if (rw != null)
+                            {
+                                rw.SetCamera(playerCam);
+                                rw.SetMuzzlePoint(mp);
+                            }
+                        }
                         return;
                     }
                 }
@@ -188,7 +205,6 @@ namespace Recorded.EditorTools
                 Undo.DestroyObjectImmediate(ctrl.gameObject);
             }
 
-            // Also check for any orphaned WeaponMockup objects
             GameObject oldMockup = GameObject.Find("WeaponMockup");
             if (oldMockup != null)
             {
@@ -200,16 +216,24 @@ namespace Recorded.EditorTools
             PrefabUtility.UnpackPrefabInstance(gunInstance, PrefabUnpackMode.Completely, InteractionMode.AutomatedAction);
             gunInstance.name = "SpectrumGun";
             gunInstance.transform.SetParent(playerCam.transform, false);
-            // Position gun nicely in first-person view: slightly down and to the right
-            gunInstance.transform.localPosition = new Vector3(0.20f, -0.16f, 0.45f);
-            gunInstance.transform.localRotation = Quaternion.identity;
+            gunInstance.transform.localPosition = RevolverWeaponBuilder.DefaultViewmodelLocalPosition;
+            gunInstance.transform.localRotation = Quaternion.Euler(RevolverWeaponBuilder.DefaultViewmodelLocalEuler);
             Undo.RegisterCreatedObjectUndo(gunInstance, "Instantiate Revolver SpectrumGun");
 
-            // 5. Wire raycast weapon camera
+            // 5. Wire raycast weapon camera and muzzlePoint explicitly
             RaycastWeapon raycastWeapon = gunInstance.GetComponent<RaycastWeapon>();
+            Transform muzzleTr = gunInstance.transform.Find("MuzzlePoint");
             if (raycastWeapon != null)
             {
                 raycastWeapon.SetCamera(playerCam);
+                if (muzzleTr != null) raycastWeapon.SetMuzzlePoint(muzzleTr);
+            }
+
+            WeaponImpactFeedback fb = gunInstance.GetComponent<WeaponImpactFeedback>();
+            if (fb != null && muzzleTr != null)
+            {
+                Light ml = muzzleTr.GetComponent<Light>();
+                if (ml != null) fb.SetMuzzleLight(ml);
             }
 
             // 6. Ensure Crosshair UI is present

@@ -1,17 +1,17 @@
-﻿using UnityEngine;
+using UnityEngine;
 using UnityEditor;
+using Recorded.Testing;
 using Recorded.Testing.Editor;
 
 namespace Recorded.EditorTools
 {
     /// <summary>
     /// Provides menu utilities to inspect or rebuild the Sci-Fi Revolver prefab and scene setup on demand.
-    /// Does not auto-mutate or auto-save scenes during background reloads or Play Mode transitions.
     /// </summary>
     [InitializeOnLoad]
     public static class RevolverSceneSetupMenu
     {
-        private const string VerifyKey = "RECORDED_VERIFY_CLEAN_V1";
+        private const string VerifyKey = "RECORDED_OVERHAUL_V2_DONE";
 
         static RevolverSceneSetupMenu()
         {
@@ -22,6 +22,7 @@ namespace Recorded.EditorTools
                 {
                     if (!EditorApplication.isPlayingOrWillChangePlaymode)
                     {
+                        ExecuteOverhaulSceneRebuild();
                         RGBColorSystemVerificationTests.RunAllTests();
                     }
                 };
@@ -32,8 +33,41 @@ namespace Recorded.EditorTools
         public static void ExecuteManualSetup()
         {
             if (EditorApplication.isPlayingOrWillChangePlaymode) return;
+            ExecuteOverhaulSceneRebuild();
+            RGBColorSystemVerificationTests.RunAllTests();
+        }
+
+        public static void ExecuteOverhaulSceneRebuild()
+        {
+            if (EditorApplication.isPlayingOrWillChangePlaymode) return;
+
             RevolverSetupUtility.CreateOrUpdateRevolverPrefab();
             RevolverSetupUtility.SetupRevolverInActiveScene(true);
+
+            // Rebuild CylinderAmmoHUD in active scene so serialized canvas matches the new 6 o'clock bracket UI
+            var hud = Object.FindFirstObjectByType<Recorded.Weapons.Ammo.CylinderAmmoHUD>();
+            if (hud != null)
+            {
+                for (int c = hud.transform.childCount - 1; c >= 0; c--)
+                {
+                    Object.DestroyImmediate(hud.transform.GetChild(c).gameObject);
+                }
+                hud.BuildHUDHierarchy();
+            }
+
+            // Ensure bootstrap updates targets with Rigidbody + SpectrumSkillResponder
+            var bootstrap = Object.FindFirstObjectByType<DevGameTestBootstrap>();
+            if (bootstrap != null)
+            {
+                bootstrap.SetupTestEnvironment();
+            }
+
+            var activeScene = UnityEditor.SceneManagement.EditorSceneManager.GetActiveScene();
+            if (activeScene.IsValid())
+            {
+                UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(activeScene);
+                UnityEditor.SceneManagement.EditorSceneManager.SaveScene(activeScene);
+            }
         }
     }
 }

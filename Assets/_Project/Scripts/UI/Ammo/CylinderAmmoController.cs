@@ -19,7 +19,7 @@ namespace Recorded.Weapons.Ammo
         // The 6 chambers of the revolver cylinder
         [SerializeField] private AmmoType[] chambers = new AmmoType[CylinderCapacity];
 
-        // The chamber index (0..5) currently aligned with the 6 o'clock firing position
+        // The chamber index (0..5) currently aligned with the 12 o'clock firing position
         [SerializeField] private int activeChamberIndex = 0;
 
         public int ChamberCount => CylinderCapacity;
@@ -57,7 +57,7 @@ namespace Recorded.Weapons.Ammo
         }
 
         /// <summary>
-        /// Attempts to consume the round at the 6 o'clock firing position.
+        /// Attempts to consume the round at the 12 o'clock firing position.
         /// If loaded, marks chamber as Empty and returns true.
         /// If empty, returns false without modifying data.
         /// </summary>
@@ -77,7 +77,7 @@ namespace Recorded.Weapons.Ammo
         }
 
         /// <summary>
-        /// Updates the active chamber index aligned with the 6 o'clock indicator.
+        /// Updates the active chamber index aligned with the 12 o'clock indicator.
         /// Called by the rotation controller when rotating the cylinder.
         /// </summary>
         public void SetActiveChamber(int index)

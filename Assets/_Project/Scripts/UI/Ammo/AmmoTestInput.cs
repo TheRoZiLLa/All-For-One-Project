@@ -8,7 +8,7 @@ namespace Recorded.Weapons.Ammo
     /// Handles:
     /// - 'R': Unlimited test reload with randomized RED, GREEN, and CYAN distribution.
     /// - 'Q' / 'E' or Mouse Scroll: Manual rotation of the cylinder (when standalone without SpectrumGunController).
-    /// - Fire (Left Click / Space): Consumes the 6 o'clock round and auto-advances the cylinder (when standalone).
+    /// - Fire (Left Click / Space): Consumes the 12 o'clock round and auto-advances the cylinder (when standalone).
     /// 
     /// SEPARATION NOTICE:
     /// This component is completely decoupled from the core ammunition data model.
@@ -133,13 +133,13 @@ namespace Recorded.Weapons.Ammo
 
             if (!firePressed) return;
 
-            // Attempt to fire the round at the 6 o'clock firing position
+            // Attempt to fire the round at the 12 o'clock firing position
             if (ammoController.HasActiveRound)
             {
                 if (ammoController.TryConsumeActiveRound(out AmmoType firedType))
                 {
                     Color logColor = GetLogColor(firedType);
-                    Debug.Log($"<color=#{ColorUtility.ToHtmlStringRGB(logColor)}><b>[AmmoTestInput]</b> Fired <b>{firedType.ToString().ToUpper()}</b> round from 6 o'clock chamber! Auto-advancing cylinder...</color>");
+                    Debug.Log($"<color=#{ColorUtility.ToHtmlStringRGB(logColor)}><b>[AmmoTestInput]</b> Fired <b>{firedType.ToString().ToUpper()}</b> round from 12 o'clock chamber! Auto-advancing cylinder...</color>");
 
                     // Automatically advance the cylinder to the next chamber following a successful shot
                     rotationController.AutoAdvance();
@@ -147,8 +147,8 @@ namespace Recorded.Weapons.Ammo
             }
             else
             {
-                // Dry fire: Chamber at 6 o'clock is empty
-                Debug.Log("<color=#888888><b>[AmmoTestInput]</b> *CLICK* (Dry Fire) - 6 o'clock chamber is EMPTY. No shot fired, cylinder does not advance.</color>");
+                // Dry fire: Chamber at 12 o'clock is empty
+                Debug.Log("<color=#888888><b>[AmmoTestInput]</b> *CLICK* (Dry Fire) - 12 o'clock chamber is EMPTY. No shot fired, cylinder does not advance.</color>");
             }
         }
 

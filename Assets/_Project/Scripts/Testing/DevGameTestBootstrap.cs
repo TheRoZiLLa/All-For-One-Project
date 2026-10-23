@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 using Recorded.Weapons;
 using Recorded.UI;
 using Recorded.ColorSystem;
@@ -11,8 +11,8 @@ namespace Recorded.Testing
 {
     /// <summary>
     /// Runtime and Editor test harness for Dev GameTest scene.
-    /// Ensures that the friend's Player controller, the camera, mock Spectrum Gun viewmodel,
-    /// crosshair, and test target dummies are properly configured and ready for immediate testing.
+    /// Ensures that the friend's Player controller, the camera, Sci-Fi Revolver viewmodel,
+    /// 6-chamber Cylinder HUD, crosshair, and RGB physics/puzzle test targets are properly configured.
     /// </summary>
     [DefaultExecutionOrder(-100)]
     public class DevGameTestBootstrap : MonoBehaviour
@@ -74,20 +74,9 @@ namespace Recorded.Testing
                 return;
             }
 
-            Debug.Log($"<color=#FFFF00>[GunDiagnostics] Gun: {gun.gameObject.name}, activeInHierarchy: {gun.gameObject.activeInHierarchy}, parent: {gun.transform.parent?.name}, localPos: {gun.transform.localPosition}, localRot: {gun.transform.localRotation.eulerAngles}, localScale: {gun.transform.localScale}, worldPos: {gun.transform.position}</color>");
-
-            Renderer[] renderers = gun.GetComponentsInChildren<Renderer>(true);
-            Debug.Log($"<color=#FFFF00>[GunDiagnostics] Found {renderers.Length} renderers under gun.</color>");
-            foreach (var r in renderers)
-            {
-                Vector3 vp = cam != null ? cam.WorldToViewportPoint(r.bounds.center) : Vector3.zero;
-                Debug.Log($"<color=#FFFF00>[GunDiagnostics] Renderer '{r.gameObject.name}' (active: {r.gameObject.activeInHierarchy}, enabled: {r.enabled}): layer={r.gameObject.layer}, localPos={r.transform.localPosition}, localScale={r.transform.localScale}, worldBounds={r.bounds}, viewportPos={vp}, matCount={r.sharedMaterials.Length}</color>");
-                for (int m = 0; m < r.sharedMaterials.Length; m++)
-                {
-                    Material mat = r.sharedMaterials[m];
-                    Debug.Log($"<color=#FFFF00>[GunDiagnostics]   Mat[{m}]: '{mat?.name}', shader='{mat?.shader?.name}'</color>");
-                }
-            }
+            RaycastWeapon rw = gun.GetComponent<RaycastWeapon>();
+            Transform mp = rw != null ? rw.MuzzlePoint : gun.transform.Find("MuzzlePoint");
+            Debug.Log($"<color=#FFFF00>[GunDiagnostics] Gun: {gun.gameObject.name}, activeInHierarchy: {gun.gameObject.activeInHierarchy}, parent: {gun.transform.parent?.name}, localPos: {gun.transform.localPosition}, localRot: {gun.transform.localRotation.eulerAngles}, muzzleLocalPos: {mp?.localPosition}, muzzleWorldPos: {mp?.position}</color>");
         }
 
         [ContextMenu("Setup Test Environment")]
@@ -102,7 +91,6 @@ namespace Recorded.Testing
 
         private void SetupLightingAndFloor()
         {
-            // Floor
             if (GameObject.Find("TestFloor") == null)
             {
                 GameObject floor = GameObject.CreatePrimitive(PrimitiveType.Plane);
@@ -117,10 +105,9 @@ namespace Recorded.Testing
                     name = "Mat_TestFloor",
                     color = new Color(0.15f, 0.16f, 0.18f)
                 };
-                floor.GetComponent<Renderer>().material = floorMat;
+                floor.GetComponent<Renderer>().sharedMaterial = floorMat;
             }
 
-            // Directional Light
             if (FindFirstObjectByType<Light>() == null)
             {
                 GameObject lightObj = new GameObject("Directional Light");
@@ -134,7 +121,6 @@ namespace Recorded.Testing
 
         private Camera SetupPlayerAndCamera()
         {
-            // 1. Look for existing Player in the scene
             GameObject player = GameObject.Find("Player");
             if (player == null)
             {
@@ -145,7 +131,6 @@ namespace Recorded.Testing
                 }
             }
 
-            // 2. If no Player in scene, spawn the friend's Player.prefab
             if (player == null)
             {
                 GameObject prefab = playerPrefab;
@@ -158,7 +143,6 @@ namespace Recorded.Testing
 #endif
                 if (prefab != null)
                 {
-                    // Clean up any old standalone Main Camera that was not part of a player
                     Camera oldCam = Camera.main;
                     if (oldCam != null && oldCam.GetComponentInParent<CharacterController>() == null)
                     {
@@ -170,14 +154,12 @@ namespace Recorded.Testing
                 }
             }
 
-            // 3. Resolve Camera on Player
             Camera cam = null;
             if (player != null)
             {
                 cam = player.GetComponentInChildren<Camera>();
             }
 
-            // 4. Fallback if Player prefab could not be loaded
             if (cam == null)
             {
                 cam = Camera.main;
@@ -199,7 +181,6 @@ namespace Recorded.Testing
         {
             if (cam == null) return;
 
-            // Check if gun is already assembled under this camera
             Transform existingGun = cam.transform.Find("SpectrumGun");
             if (existingGun != null)
             {
@@ -218,27 +199,38 @@ namespace Recorded.Testing
                 }
                 else
                 {
-                    // Enforce rotation facing forward away from player
                     if (revModel.localRotation.eulerAngles.y < 200f || revModel.localRotation.eulerAngles.y > 300f)
                     {
                         revModel.localRotation = Quaternion.Euler(0f, -90f, 0f);
                     }
+
+                    MeshRenderer barrelRend = null;
+                    foreach (var r in revModel.GetComponentsInChildren<MeshRenderer>(true))
+                    {
+                        if (r.gameObject.name.ToLower().Contains("barrel")) { barrelRend = r; break; }
+                    }
+
                     Transform mp = existingGun.Find("MuzzlePoint");
-                    if (mp != null) mp.localPosition = new Vector3(0f, 0.01f, 0.09f);
+                    if (mp != null)
+                    {
+                        mp.localPosition = RevolverWeaponBuilder.CalculateBarrelTipLocalPosition(existingGun, barrelRend);
+                        if (rw != null) rw.SetMuzzlePoint(mp);
+                    }
                     Transform cg = existingGun.Find("ChamberGlow");
-                    if (cg != null) cg.localPosition = new Vector3(0f, 0.035f, -0.02f);
+                    if (cg != null) cg.localPosition = RevolverWeaponBuilder.DefaultChamberGlowLocalPosition;
                 }
-                existingGun.localPosition = new Vector3(0.20f, -0.16f, 0.50f);
+
+                existingGun.localPosition = RevolverWeaponBuilder.DefaultViewmodelLocalPosition;
+                existingGun.localRotation = Quaternion.Euler(RevolverWeaponBuilder.DefaultViewmodelLocalEuler);
                 return;
             }
 
-            // Check if gun exists elsewhere in the scene and reparent it to player camera
             SpectrumGunController existingController = FindFirstObjectByType<SpectrumGunController>();
             if (existingController != null)
             {
                 existingController.transform.SetParent(cam.transform, false);
-                existingController.transform.localPosition = new Vector3(0.20f, -0.16f, 0.50f);
-                existingController.transform.localRotation = Quaternion.identity;
+                existingController.transform.localPosition = RevolverWeaponBuilder.DefaultViewmodelLocalPosition;
+                existingController.transform.localRotation = Quaternion.Euler(RevolverWeaponBuilder.DefaultViewmodelLocalEuler);
                 RaycastWeapon existingRaycast = existingController.GetComponent<RaycastWeapon>();
                 if (existingRaycast != null) existingRaycast.SetCamera(cam);
 
@@ -258,10 +250,21 @@ namespace Recorded.Testing
                     {
                         revModel.localRotation = Quaternion.Euler(0f, -90f, 0f);
                     }
+
+                    MeshRenderer barrelRend = null;
+                    foreach (var r in revModel.GetComponentsInChildren<MeshRenderer>(true))
+                    {
+                        if (r.gameObject.name.ToLower().Contains("barrel")) { barrelRend = r; break; }
+                    }
+
                     Transform mp = existingController.transform.Find("MuzzlePoint");
-                    if (mp != null) mp.localPosition = new Vector3(0f, 0.01f, 0.09f);
+                    if (mp != null)
+                    {
+                        mp.localPosition = RevolverWeaponBuilder.CalculateBarrelTipLocalPosition(existingController.transform, barrelRend);
+                        if (existingRaycast != null) existingRaycast.SetMuzzlePoint(mp);
+                    }
                     Transform cg = existingController.transform.Find("ChamberGlow");
-                    if (cg != null) cg.localPosition = new Vector3(0f, 0.035f, -0.02f);
+                    if (cg != null) cg.localPosition = RevolverWeaponBuilder.DefaultChamberGlowLocalPosition;
                 }
                 return;
             }
@@ -269,25 +272,20 @@ namespace Recorded.Testing
             // Viewmodel root attached under Camera
             GameObject gunRoot = new GameObject("SpectrumGun");
             gunRoot.transform.SetParent(cam.transform, false);
-            // First-person viewmodel offset (slightly lower and to the right)
-            gunRoot.transform.localPosition = new Vector3(0.20f, -0.16f, 0.50f);
-            gunRoot.transform.localRotation = Quaternion.identity;
+            gunRoot.transform.localPosition = RevolverWeaponBuilder.DefaultViewmodelLocalPosition;
+            gunRoot.transform.localRotation = Quaternion.Euler(RevolverWeaponBuilder.DefaultViewmodelLocalEuler);
 
-            // Weapon Components
             RaycastWeapon raycastWeapon = gunRoot.AddComponent<RaycastWeapon>();
             raycastWeapon.SetCamera(cam);
 
             WeaponImpactFeedback feedback = gunRoot.AddComponent<WeaponImpactFeedback>();
-
             SpectrumGunController controller = gunRoot.AddComponent<SpectrumGunController>();
 
-            // Build Revolver Model with friend's textures (Red, Green, Cyan)
             RevolverWeaponBuilder.BuildRevolver(gunRoot.transform, out Transform newMuzzlePoint, out Light newMuzzleLight);
 
             raycastWeapon.SetMuzzlePoint(newMuzzlePoint);
             feedback.SetMuzzleLight(newMuzzleLight);
 
-            // Crosshair UI
             if (FindFirstObjectByType<CrosshairUI>() == null)
             {
                 GameObject crosshairObj = new GameObject("CrosshairUI_Manager");
@@ -295,7 +293,6 @@ namespace Recorded.Testing
                 crosshairObj.AddComponent<CrosshairUI>();
             }
 
-            // Apply initial Red mode
             controller.SetColorMode(SpectrumColorMode.Red);
         }
 
@@ -304,7 +301,6 @@ namespace Recorded.Testing
             Transform targetsContainer = GameObject.Find("TestTargets_Group")?.transform;
             if (targetsContainer != null)
             {
-                // Ensure all existing targets under TestTargets_Group have RGBColorTarget and are Neutral Grey
                 foreach (Transform child in targetsContainer)
                 {
                     var oldTestTarget = child.GetComponent<TestTarget>();
@@ -319,7 +315,24 @@ namespace Recorded.Testing
                         colorTarget = child.gameObject.AddComponent<RGBColorTarget>();
                     }
 
-                    // Reset to None state and Neutral Grey visuals
+                    // Ensure Rigidbody & SpectrumSkillResponder are attached so RED Impulse, GREEN Bind, and CYAN Stasis work on scene targets!
+                    Rigidbody rb = child.GetComponent<Rigidbody>();
+                    if (rb == null)
+                    {
+                        rb = child.gameObject.AddComponent<Rigidbody>();
+                        rb.mass = 1.5f;
+                        rb.linearDamping = 0.5f;
+                        rb.angularDamping = 0.5f;
+                        rb.interpolation = RigidbodyInterpolation.Interpolate;
+                    }
+
+                    SpectrumSkillResponder responder = child.GetComponent<SpectrumSkillResponder>();
+                    if (responder == null)
+                    {
+                        responder = child.gameObject.AddComponent<SpectrumSkillResponder>();
+                    }
+                    responder.EnsureInitialized();
+
                     colorTarget.ResetColors();
                 }
                 return;
@@ -341,7 +354,7 @@ namespace Recorded.Testing
                 GameObject targetObj = GameObject.CreatePrimitive(PrimitiveType.Cube);
                 targetObj.name = targetNames[i];
                 targetObj.transform.SetParent(targetsContainer, false);
-                targetObj.transform.position = new Vector3(xOffsets[i], 1.4f, dist);
+                targetObj.transform.position = new Vector3(xOffsets[i], 1.1f, dist);
                 targetObj.transform.localScale = new Vector3(1f, 1.8f, 1f);
 
                 Material mat = new Material(litShader)
@@ -349,9 +362,17 @@ namespace Recorded.Testing
                     name = $"Mat_{targetNames[i]}",
                     color = neutralGrey
                 };
-                targetObj.GetComponent<Renderer>().material = mat;
+                targetObj.GetComponent<Renderer>().sharedMaterial = mat;
+
+                Rigidbody rb = targetObj.AddComponent<Rigidbody>();
+                rb.mass = 1.5f;
+                rb.linearDamping = 0.5f;
+                rb.angularDamping = 0.5f;
+                rb.interpolation = RigidbodyInterpolation.Interpolate;
 
                 RGBColorTarget colorTarget = targetObj.AddComponent<RGBColorTarget>();
+                SpectrumSkillResponder responder = targetObj.AddComponent<SpectrumSkillResponder>();
+                responder.EnsureInitialized();
                 colorTarget.ResetColors();
             }
         }

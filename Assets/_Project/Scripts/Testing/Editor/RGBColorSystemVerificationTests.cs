@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 using UnityEditor;
 using UnityEngine;
 using Recorded.ColorSystem;
@@ -8,19 +8,23 @@ using Recorded.Weapons.Ammo;
 namespace Recorded.Testing.Editor
 {
     /// <summary>
-    /// Comprehensive verification suite for RECORDED RGB Color System, Cylinder Ammo (6 o'clock indicator),
-    /// Weapon Integration, Reusable Gameplay Skills (Impulse/Bind/Stasis), and Puzzle Condition triggers.
-    /// Can be run via the Unity Editor menu: RECORDED > Tests > Run RGB Color System Verification.
+    /// Automated Editor verification suite for the RECORDED Spectrum Gun Overhaul:
+    /// - 8-state RGB additive color mixing & independent 5-second timers
+    /// - 6 o'clock Cylinder Ammo HUD, rotation sync, and dry-fire rules
+    /// - Real physical weapon skills (RED Impulse, GREEN Bind SpringJoint & independent timer, CYAN Stasis & independent timer)
+    /// - Exact barrel-tip MuzzlePoint resolution and close-range viewmodel placement
+    /// - ColorPuzzleCondition integration
     /// </summary>
     public static class RGBColorSystemVerificationTests
     {
-        [MenuItem("RECORDED/Tests/Run RGB Color System Verification", false, 10)]
+        [MenuItem("RECORDED/Run Automated RGB & Cylinder Verification (28 Cases)", false, 10)]
         public static void RunAllTests()
         {
-            var results = new StringBuilder();
-            results.AppendLine("<b>=== RECORDED Full System Verification Suite (24 Cases) ===</b>");
+            StringBuilder results = new StringBuilder();
+            results.AppendLine("<b>[RECORDED QA] Running Automated RGB Color, Weapon Skills, Muzzle & 6-O'Clock Cylinder Verification Suite (28 Cases):</b>");
+
             int passedCount = 0;
-            const int totalCount = 24;
+            int totalCount = 28;
 
             GameObject testObj = GameObject.CreatePrimitive(PrimitiveType.Cube);
             testObj.name = "Test_RGBTarget_Temp";
@@ -37,6 +41,12 @@ namespace Recorded.Testing.Editor
             CylinderAmmoController ammoCtrl = ammoSysObj.AddComponent<CylinderAmmoController>();
             CylinderRotationController rotCtrl = ammoSysObj.AddComponent<CylinderRotationController>();
             CylinderAmmoHUD hud = ammoSysObj.AddComponent<CylinderAmmoHUD>();
+
+            GameObject gunTestObj = new GameObject("Test_SpectrumGun_Temp");
+            GameObject muzzleChild = new GameObject("MuzzlePoint");
+            muzzleChild.transform.SetParent(gunTestObj.transform, false);
+            muzzleChild.transform.localPosition = RevolverWeaponBuilder.DefaultMuzzleLocalPosition;
+            RaycastWeapon raycastWep = gunTestObj.AddComponent<RaycastWeapon>();
 
             try
             {
@@ -148,11 +158,11 @@ namespace Recorded.Testing.Editor
                 secondTarget.ResetColors();
                 secondTarget.ApplyColor(ObjectColorState.Red);
                 secondTarget.ApplyColor(ObjectColorState.Green);
-                bool pass14 = (grState == secondTarget.CurrentColorState) &&
-                              (RGBColorTarget.GetColorForState(grState) == RGBColorTarget.ColorYellow);
-                LogCase(14, "Different application orders produce identical combined state", pass14, ref passedCount, results);
+                ObjectColorState rgState = secondTarget.CurrentColorState;
+                bool pass14 = (grState == rgState) && (grState == (ObjectColorState.Red | ObjectColorState.Green));
+                LogCase(14, "Order-independent color mixing (G+R equals R+G)", pass14, ref passedCount, results);
 
-                // Case 15: Non-color target does not cause error on IColorReceivable lookup
+                // Case 15: Plain object without IColorReceivable does not throw
                 IColorReceivable nonColorLookup = plainObj.GetComponentInParent<IColorReceivable>();
                 bool pass15 = (nonColorLookup == null);
                 LogCase(15, "Target without color component is safely ignored without NullReference", pass15, ref passedCount, results);
@@ -181,13 +191,14 @@ namespace Recorded.Testing.Editor
                 bool pass17 = (childBlock.GetColor("_BaseColor") == RGBColorTarget.ColorMagenta);
                 LogCase(17, "Multi-renderer hierarchy updates child renderers via MaterialPropertyBlock", pass17, ref passedCount, results);
 
-                // Case 18: Cylinder 6 o'clock Indicator & Chamber 0 bottom alignment
+                // Case 18: Cylinder 6 o'clock Indicator, Bracket & Chamber 0 bottom alignment
                 hud.BuildHUDHierarchy();
                 Transform ind6 = ammoSysObj.transform.Find("CylinderAmmo_Canvas/CylinderHUD_Root/Stationary_6oclock_FiringIndicator");
+                Transform bracket6 = ammoSysObj.transform.Find("CylinderAmmo_Canvas/CylinderHUD_Root/Stationary_6oclock_ChamberBracket");
                 Transform ch0 = ammoSysObj.transform.Find("CylinderAmmo_Canvas/CylinderHUD_Root/Rotating_InnerCylinder/Chamber_0");
                 RectTransform ch0Rt = ch0 != null ? ch0.GetComponent<RectTransform>() : null;
-                bool pass18 = (ind6 != null) && (ch0Rt != null) && (ch0Rt.anchoredPosition.y < -10f) && Mathf.Abs(ch0Rt.anchoredPosition.x) < 1f;
-                LogCase(18, "Cylinder HUD places stationary firing indicator and Chamber_0 at 6 o'clock bottom", pass18, ref passedCount, results);
+                bool pass18 = (ind6 != null) && (bracket6 != null) && (ch0Rt != null) && (ch0Rt.anchoredPosition.y < -10f) && Mathf.Abs(ch0Rt.anchoredPosition.x) < 1f;
+                LogCase(18, "Cylinder HUD places stationary firing indicator/bracket and Chamber_0 at 6 o'clock bottom", pass18, ref passedCount, results);
 
                 // Case 19: Cylinder TestReloadRandom fills all 6 chambers with Red/Green/Cyan
                 ammoCtrl.TestReloadRandom();
@@ -206,14 +217,16 @@ namespace Recorded.Testing.Editor
                 bool pass20 = consumedOk && (consumedType == AmmoType.Cyan) && (ammoCtrl.GetChamberAmmo(0) == AmmoType.Empty) && dryFireBlocked;
                 LogCase(20, "Active chamber consumption empties slot and blocks dry-fire consumption", pass20, ref passedCount, results);
 
-                // Case 21: Q / E rotation step direction & wrapping across 6 chambers
+                // Case 21: Q / E rotation step direction, immediate active index update & visual angle sync
                 ammoCtrl.SetActiveChamber(0);
-                rotCtrl.RotateChamberStep(1);  // RotateLeft / AutoAdvance -> index 1
-                ammoCtrl.SetActiveChamber(1);
-                rotCtrl.RotateChamberStep(-1); // RotateRight -> back to index 0
-                ammoCtrl.SetActiveChamber(0);
-                bool pass21 = (ammoCtrl.ActiveChamberIndex == 0);
-                LogCase(21, "Cylinder Q/E and AutoAdvance index transitions wrap cleanly across 0..5", pass21, ref passedCount, results);
+                rotCtrl.RotateChamberStep(1);  // RotateLeft / AutoAdvance -> immediately updates ActiveChamberIndex to 1 and visual angle to +60
+                bool step1Ok = (ammoCtrl.ActiveChamberIndex == 1) && (hud.InnerCylinderRect != null) &&
+                               Mathf.Approximately(Mathf.DeltaAngle(0f, hud.InnerCylinderRect.localEulerAngles.z), 60f);
+                rotCtrl.RotateChamberStep(-1); // RotateRight -> back to index 0 and visual angle 0
+                bool stepBackOk = (ammoCtrl.ActiveChamberIndex == 0) &&
+                                  Mathf.Approximately(Mathf.DeltaAngle(0f, hud.InnerCylinderRect.localEulerAngles.z), 0f);
+                bool pass21 = step1Ok && stepBackOk;
+                LogCase(21, "Cylinder Q/E and AutoAdvance immediately sync ActiveChamberIndex and inner cylinder Z-rotation", pass21, ref passedCount, results);
 
                 // Case 22: ColorPuzzleCondition triggers when watched target matches required color state
                 ColorPuzzleCondition puzzleCond = testObj.AddComponent<ColorPuzzleCondition>();
@@ -230,7 +243,7 @@ namespace Recorded.Testing.Editor
 
                 // Case 23: SpectrumSkillResponder RED Impulse applies velocity to Rigidbody even on duplicate hit
                 Rigidbody rb = secondObj.AddComponent<Rigidbody>();
-                rb.useGravity = false;
+                rb.useGravity = true;
                 SpectrumSkillResponder skillResp = secondObj.AddComponent<SpectrumSkillResponder>();
                 skillResp.EnsureInitialized();
                 secondTarget.ResetColors();
@@ -246,9 +259,37 @@ namespace Recorded.Testing.Editor
                 secondTarget.ApplyColor(ObjectColorState.Blue);
                 bool statesActive = skillResp.IsGreenBound && skillResp.IsBlueStasis && !rb.useGravity;
                 secondTarget.ResetColors();
-                bool statesRestored = !skillResp.IsGreenBound && !skillResp.IsBlueStasis;
+                bool statesRestored = !skillResp.IsGreenBound && !skillResp.IsBlueStasis && rb.useGravity;
                 bool pass24 = statesActive && statesRestored;
                 LogCase(24, "SpectrumSkillResponder activates GREEN Bind & CYAN Stasis and restores physics on reset", pass24, ref passedCount, results);
+
+                // Case 25: GREEN Bind creates real SpringJoint without duplicating joints on repeated hits and cleans up on expire
+                skillResp.OnColorShotHit(AmmoType.Green, ObjectColorState.Green, dummyHit, Vector3.forward);
+                skillResp.OnColorShotHit(AmmoType.Green, ObjectColorState.Green, dummyHit, Vector3.forward);
+                SpringJoint[] jointsDuringBind = secondObj.GetComponents<SpringJoint>();
+                bool singleJointCreated = (jointsDuringBind.Length == 1) && (skillResp.ActiveBindJoint != null);
+                skillResp.TickSkillTimers(10.0f); // Advance past independent bindDuration
+                SpringJoint[] jointsAfterExpire = secondObj.GetComponents<SpringJoint>();
+                bool pass25 = singleJointCreated && (!skillResp.IsGreenBound) && (jointsAfterExpire.Length == 0);
+                LogCase(25, "GREEN Bind creates a single SpringJoint tether (no duplicates on re-hit) and cleans up on timer expire", pass25, ref passedCount, results);
+
+                // Case 26: CYAN Stasis runs on its own independent skill timer and cleanly restores gravity/damping when expired
+                skillResp.OnColorShotHit(AmmoType.Cyan, ObjectColorState.Blue, dummyHit, Vector3.forward);
+                bool stasisStarted = skillResp.IsBlueStasis && (!rb.useGravity);
+                skillResp.TickSkillTimers(10.0f);
+                bool stasisExpiredCleanly = (!skillResp.IsBlueStasis) && rb.useGravity;
+                bool pass26 = stasisStarted && stasisExpiredCleanly;
+                LogCase(26, "CYAN Stasis arrests motion with independent timer and restores original Rigidbody gravity/damping on expire", pass26, ref passedCount, results);
+
+                // Case 27: RaycastWeapon auto-resolves MuzzlePoint child so shots never originate from under the gun grip
+                Transform resolvedMuzzle = raycastWep.MuzzlePoint;
+                bool pass27 = (resolvedMuzzle == muzzleChild.transform) && (resolvedMuzzle.localPosition.y > 0.03f) && (resolvedMuzzle.localPosition.z > 0.05f);
+                LogCase(27, "RaycastWeapon resolves MuzzlePoint child at upper barrel tip instead of weapon root", pass27, ref passedCount, results);
+
+                // Case 28: First-Person Viewmodel default placement is ergonomic and close to camera
+                Vector3 vmPos = RevolverWeaponBuilder.DefaultViewmodelLocalPosition;
+                bool pass28 = (vmPos.z >= 0.18f && vmPos.z <= 0.32f) && (vmPos.x >= 0.10f && vmPos.x <= 0.18f);
+                LogCase(28, "First-person viewmodel default placement sits naturally near camera right hand", pass28, ref passedCount, results);
             }
             finally
             {
@@ -256,6 +297,7 @@ namespace Recorded.Testing.Editor
                 Object.DestroyImmediate(secondObj);
                 Object.DestroyImmediate(plainObj);
                 Object.DestroyImmediate(ammoSysObj);
+                Object.DestroyImmediate(gunTestObj);
             }
 
             results.AppendLine($"\n<b>Total Passed: {passedCount} / {totalCount}</b>");

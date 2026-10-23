@@ -1,11 +1,12 @@
-using System;
+﻿using System;
 using UnityEngine;
 
 namespace Recorded.Weapons
 {
     /// <summary>
-    /// Handles target detection and raycasting along the camera's forward view.
-    /// Decoupled from weapon visual presentation and input controllers.
+    /// Handles target detection and raycasting along the camera's forward view while ensuring
+    /// visual projectile tracers always originate accurately from the barrel tip (MuzzlePoint).
+    /// Also checks for close-range obstruction between the camera/muzzle and the crosshair target.
     /// </summary>
     public class RaycastWeapon : MonoBehaviour
     {
@@ -14,7 +15,7 @@ namespace Recorded.Weapons
         [SerializeField] private Camera playerCamera;
 
         [Header("Muzzle & Tracer")]
-        [Tooltip("Origin point of projectile visual tracers and muzzle flashes.")]
+        [Tooltip("Origin point of projectile visual tracers and muzzle flashes at the barrel tip.")]
         [SerializeField] private Transform muzzlePoint;
 
         [Header("Raycast Settings")]
@@ -31,66 +32,164 @@ namespace Recorded.Weapons
         public event Action<RaycastHit> OnTargetHit;
         public event Action<Vector3, Vector3> OnTargetMiss; // origin, direction
 
-        public Transform MuzzlePoint => muzzlePoint;
+        public Transform MuzzlePoint
+        {
+            get
+            {
+                ResolveMuzzlePoint();
+                return muzzlePoint;
+            }
+        }
+
         public Camera PlayerCamera => playerCamera;
         public float MaxRange { get => maxRange; set => maxRange = value; }
         public LayerMask HitLayers { get => hitLayers; set => hitLayers = value; }
 
         private void Awake()
         {
-            // Cache camera reference according to Game Developer optimization rules (avoid Camera.main in Update)
+            ResolveCamera();
+            ResolveMuzzlePoint();
+        }
+
+        public void ResolveCamera()
+        {
             if (playerCamera == null)
             {
-                playerCamera = Camera.main;
+                playerCamera = GetComponentInParent<Camera>();
+                if (playerCamera == null)
+                {
+                    playerCamera = Camera.main;
+                }
             }
+        }
 
-            if (muzzlePoint == null)
+        public void ResolveMuzzlePoint()
+        {
+            // If muzzlePoint is null or accidentally points to the weapon root instead of the barrel tip child, resolve MuzzlePoint child
+            if (muzzlePoint == null || muzzlePoint == transform)
             {
-                muzzlePoint = transform;
+                Transform childMuzzle = transform.Find("MuzzlePoint");
+                if (childMuzzle != null)
+                {
+                    muzzlePoint = childMuzzle;
+                    return;
+                }
+
+                // Deep search for MuzzlePoint in hierarchy
+                Transform[] allChildren = GetComponentsInChildren<Transform>(true);
+                for (int i = 0; i < allChildren.Length; i++)
+                {
+                    if (allChildren[i] != null && allChildren[i].name == "MuzzlePoint")
+                    {
+                        muzzlePoint = allChildren[i];
+                        return;
+                    }
+                }
+
+                if (muzzlePoint == null)
+                {
+                    muzzlePoint = transform;
+                }
             }
         }
 
         /// <summary>
-        /// Perform a raycast along the center of the camera viewport.
+        /// Perform a raycast along the center of the camera viewport, with close-range muzzle obstruction verification.
         /// </summary>
         /// <param name="hitInfo">Information about the hit target if successful.</param>
         /// <param name="targetPoint">World position of the hit point or the max range point if missed.</param>
         /// <returns>True if an object with a collider was hit within maxRange, otherwise false.</returns>
         public bool FireRaycast(out RaycastHit hitInfo, out Vector3 targetPoint)
         {
-            if (playerCamera == null)
-            {
-                playerCamera = Camera.main;
-            }
+            ResolveCamera();
+            ResolveMuzzlePoint();
 
-            // Ray originating from the exact center of the camera screen (0.5, 0.5)
-            Ray ray = playerCamera != null
+            // 1. Primary aim ray originating from the exact center of the camera screen (0.5, 0.5)
+            Ray aimRay = playerCamera != null
                 ? playerCamera.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0f))
                 : new Ray(transform.position, transform.forward);
 
-            RaycastHit[] hits = Physics.RaycastAll(ray, maxRange, hitLayers, triggerInteraction);
+            bool foundAimHit = false;
+            RaycastHit bestAimHit = default;
+
+            RaycastHit[] hits = Physics.RaycastAll(aimRay, maxRange, hitLayers, triggerInteraction);
             if (hits != null && hits.Length > 0)
             {
-                System.Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
+                Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
                 for (int i = 0; i < hits.Length; i++)
                 {
-                    // Ignore self / shooter's own character controller or body
-                    if (hits[i].transform.root == transform.root)
+                    if (IsSelfCollider(hits[i].collider))
                     {
                         continue;
                     }
 
-                    hitInfo = hits[i];
-                    targetPoint = hitInfo.point;
-                    OnTargetHit?.Invoke(hitInfo);
-
-                    return true;
+                    bestAimHit = hits[i];
+                    foundAimHit = true;
+                    break;
                 }
             }
 
+            Vector3 desiredTargetPoint = foundAimHit
+                ? bestAimHit.point
+                : aimRay.origin + (aimRay.direction * maxRange);
+
+            // 2. Close-range barrel-to-target obstruction check so shots cannot clip through walls right in front of the barrel
+            if (muzzlePoint != null && muzzlePoint != transform)
+            {
+                Vector3 muzzlePos = muzzlePoint.position;
+                Vector3 toTarget = desiredTargetPoint - muzzlePos;
+                float distToTarget = toTarget.magnitude;
+
+                if (distToTarget > 0.05f)
+                {
+                    RaycastHit[] muzzleHits = Physics.RaycastAll(muzzlePos, toTarget / distToTarget, distToTarget - 0.02f, hitLayers, triggerInteraction);
+                    if (muzzleHits != null && muzzleHits.Length > 0)
+                    {
+                        Array.Sort(muzzleHits, (a, b) => a.distance.CompareTo(b.distance));
+                        for (int i = 0; i < muzzleHits.Length; i++)
+                        {
+                            if (IsSelfCollider(muzzleHits[i].collider))
+                            {
+                                continue;
+                            }
+
+                            // If an obstacle blocks the barrel before reaching the crosshair target
+                            if (!foundAimHit || muzzleHits[i].collider != bestAimHit.collider)
+                            {
+                                hitInfo = muzzleHits[i];
+                                targetPoint = hitInfo.point;
+                                OnTargetHit?.Invoke(hitInfo);
+                                return true;
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (foundAimHit)
+            {
+                hitInfo = bestAimHit;
+                targetPoint = bestAimHit.point;
+                OnTargetHit?.Invoke(hitInfo);
+                return true;
+            }
+
             hitInfo = default;
-            targetPoint = ray.origin + (ray.direction * maxRange);
-            OnTargetMiss?.Invoke(ray.origin, ray.direction);
+            targetPoint = desiredTargetPoint;
+            OnTargetMiss?.Invoke(aimRay.origin, aimRay.direction);
+            return false;
+        }
+
+        private bool IsSelfCollider(Collider col)
+        {
+            if (col == null) return true;
+            if (col.transform.root == transform.root) return true;
+            if (col.GetComponentInParent<CharacterController>() != null && playerCamera != null &&
+                col.transform.root == playerCamera.transform.root)
+            {
+                return true;
+            }
             return false;
         }
 

@@ -17,7 +17,7 @@ namespace Recorded.Weapons.Ammo
 
         [Header("Animation Settings")]
         [Tooltip("Duration in seconds for a 60-degree chamber rotation.")]
-        [SerializeField] private float rotationDuration = 0.12f;
+        [SerializeField] private float rotationDuration = 0.11f;
 
         [Tooltip("Curve for mechanical snap easing.")]
         [SerializeField] private AnimationCurve rotationCurve = AnimationCurve.EaseInOut(0, 0, 1, 1);
@@ -37,19 +37,44 @@ namespace Recorded.Weapons.Ammo
 
         private void Awake()
         {
-            if (ammoController == null)
-            {
-                ammoController = GetComponent<CylinderAmmoController>();
-            }
+            ResolveDependencies();
         }
 
         private void Start()
         {
+            ResolveDependencies();
+
             // Sync initial visual orientation (Chamber activeIndex aligned at 6 o'clock)
             int activeIndex = ammoController != null ? ammoController.ActiveChamberIndex : 0;
             _currentAngle = activeIndex * ChamberAngleStep;
             _targetAngle = _currentAngle;
             ApplyVisualAngle(_currentAngle);
+        }
+
+        public void ResolveDependencies()
+        {
+            if (ammoController == null)
+            {
+                ammoController = GetComponent<CylinderAmmoController>();
+                if (ammoController == null)
+                {
+                    ammoController = FindFirstObjectByType<CylinderAmmoController>();
+                }
+            }
+
+            if (rotatingInnerCylinder == null)
+            {
+                // Auto-resolve the live Rotating_InnerCylinder under this HUD hierarchy
+                Transform[] children = GetComponentsInChildren<Transform>(true);
+                for (int i = 0; i < children.Length; i++)
+                {
+                    if (children[i] != null && children[i].name == "Rotating_InnerCylinder" && children[i].gameObject.activeInHierarchy)
+                    {
+                        rotatingInnerCylinder = children[i].GetComponent<RectTransform>();
+                        break;
+                    }
+                }
+            }
         }
 
         /// <summary>
@@ -58,7 +83,6 @@ namespace Recorded.Weapons.Ammo
         /// </summary>
         public void RotateLeft()
         {
-            if (_isRotating) return;
             RotateChamberStep(1);
         }
 
@@ -68,7 +92,6 @@ namespace Recorded.Weapons.Ammo
         /// </summary>
         public void RotateRight()
         {
-            if (_isRotating) return;
             RotateChamberStep(-1);
         }
 
@@ -77,19 +100,32 @@ namespace Recorded.Weapons.Ammo
         /// </summary>
         public void AutoAdvance()
         {
-            if (_isRotating) return;
             RotateChamberStep(1); // Advances to next sequential chamber
         }
 
         public void RotateChamberStep(int indexDelta)
         {
+            ResolveDependencies();
             if (ammoController == null) return;
 
             int currentActive = ammoController.ActiveChamberIndex;
             int nextActive = (currentActive + indexDelta + CylinderAmmoController.CylinderCapacity) % CylinderAmmoController.CylinderCapacity;
 
+            // Update logical active chamber immediately so rapid inputs or tests never desync
+            ammoController.SetActiveChamber(nextActive);
+
             // Target visual angle: each index change shifts the cylinder by 60 degrees
-            _targetAngle = _currentAngle + (indexDelta * ChamberAngleStep);
+            _targetAngle += (indexDelta * ChamberAngleStep);
+
+            if (!Application.isPlaying || !isActiveAndEnabled || rotationDuration <= 0.001f)
+            {
+                _currentAngle = _targetAngle;
+                NormalizeAngles();
+                ApplyVisualAngle(_currentAngle);
+                OnRotationStarted?.Invoke(nextActive);
+                OnRotationCompleted?.Invoke(nextActive);
+                return;
+            }
 
             if (_rotationCoroutine != null)
             {
@@ -109,35 +145,42 @@ namespace Recorded.Weapons.Ammo
 
             while (elapsed < rotationDuration)
             {
-                elapsed += Time.deltaTime;
+                elapsed += Time.unscaledDeltaTime;
                 float t = Mathf.Clamp01(elapsed / rotationDuration);
                 float curveT = rotationCurve != null ? rotationCurve.Evaluate(t) : t;
 
-                _currentAngle = Mathf.Lerp(startAngle, _targetAngle, curveT);
+                // Slight mechanical overshoot & snap for revolver ratchet feel
+                float snapT = curveT + (Mathf.Sin(t * Mathf.PI) * 0.04f);
+                _currentAngle = Mathf.LerpUnclamped(startAngle, _targetAngle, snapT);
                 ApplyVisualAngle(_currentAngle);
                 yield return null;
             }
 
             _currentAngle = _targetAngle;
+            NormalizeAngles();
             ApplyVisualAngle(_currentAngle);
-
-            // Keep continuous angle within safe numerical range without jumps
-            if (_currentAngle >= 360f || _currentAngle <= -360f)
-            {
-                _currentAngle %= 360f;
-                _targetAngle = _currentAngle;
-            }
-
-            // Synchronize final active index with ammo controller
-            ammoController.SetActiveChamber(targetIndex);
 
             _isRotating = false;
             _rotationCoroutine = null;
             OnRotationCompleted?.Invoke(targetIndex);
         }
 
+        private void NormalizeAngles()
+        {
+            if (_currentAngle >= 360f || _currentAngle <= -360f)
+            {
+                _currentAngle %= 360f;
+                _targetAngle = _currentAngle;
+            }
+        }
+
         private void ApplyVisualAngle(float zAngle)
         {
+            if (rotatingInnerCylinder == null)
+            {
+                ResolveDependencies();
+            }
+
             if (rotatingInnerCylinder != null)
             {
                 rotatingInnerCylinder.localRotation = Quaternion.Euler(0f, 0f, zAngle);

@@ -6,15 +6,15 @@ namespace Recorded.Weapons
 {
     public enum SpectrumColorMode
     {
-        Red,    // Impulse (provisional)
-        Green,  // Bind (provisional)
-        Blue    // Stasis (provisional)
+        Red,    // Impulse
+        Green,  // Bind
+        Blue    // Stasis (Cyan)
     }
 
     /// <summary>
-    /// Master controller for Spectrum Gun prototype.
-    /// Manages fire rate, input handling, real-time RGB mode switching (Keys 1, 2, 3 / Scroll Wheel),
-    /// and synchronizes colors across Weapon Model Core, Crosshair, and VFX.
+    /// Master controller for the RECORDED Spectrum Gun.
+    /// Manages fire rate, input handling, 6-chamber cylinder integration, first-person viewmodel
+    /// ergonomics/recoil animation, and real-time color synchronization across Weapon Core, Crosshair, and VFX.
     /// </summary>
     public class SpectrumGunController : MonoBehaviour
     {
@@ -36,6 +36,11 @@ namespace Recorded.Weapons
         [Tooltip("If true, gun fires continuously while holding fire button. If false, semi-auto.")]
         [SerializeField] private bool isAutomatic = false;
 
+        [Header("First-Person Recoil & Sway Polish")]
+        [SerializeField] private float recoilKickbackZ = 0.028f;
+        [SerializeField] private float recoilKickUpPitch = 6.5f;
+        [SerializeField] private float recoilRecoverySpeed = 14f;
+
         [Header("Input Configuration")]
         [Tooltip("Optional Input Action Reference for Attack. If not set, reads default mouse left-click.")]
         [SerializeField] private InputActionReference attackAction;
@@ -50,12 +55,36 @@ namespace Recorded.Weapons
 
         private float _nextFireTime;
         private InputAction _resolvedAttackAction;
+        private Transform _revolverModelTransform;
+        private Vector3 _modelBaseLocalPos = Vector3.zero;
+        private Quaternion _modelBaseLocalRot = Quaternion.Euler(0f, -90f, 0f);
+        private float _currentRecoil;
 
         public SpectrumColorMode CurrentMode => currentMode;
         public float FireRate { get => fireRate; set => fireRate = Mathf.Max(0.1f, value); }
         public bool IsAutomatic { get => isAutomatic; set => isAutomatic = value; }
 
         private void Awake()
+        {
+            ResolveDependencies();
+        }
+
+        private void Start()
+        {
+            ResolveDependencies();
+            EnsureViewmodelAndMuzzleAlignment();
+
+            if (ammoController != null)
+            {
+                SyncWithActiveChamber();
+            }
+            else
+            {
+                ApplyColorMode(currentMode);
+            }
+        }
+
+        public void ResolveDependencies()
         {
             if (raycastWeapon == null)
             {
@@ -77,23 +106,66 @@ namespace Recorded.Weapons
                 rotationController = FindFirstObjectByType<Ammo.CylinderRotationController>();
             }
 
+            if (_revolverModelTransform == null)
+            {
+                _revolverModelTransform = transform.Find("RevolverModel");
+                if (_revolverModelTransform != null)
+                {
+                    _modelBaseLocalPos = _revolverModelTransform.localPosition;
+                    _modelBaseLocalRot = _revolverModelTransform.localRotation;
+                }
+            }
+
             ResolveCoreRenderer();
         }
 
-        private void Start()
+        private void EnsureViewmodelAndMuzzleAlignment()
         {
-            if (ammoController != null)
+            // Ensure first-person viewmodel sits naturally close to the player's right hand rather than floating far away
+            if (transform.parent != null && transform.parent.GetComponent<Camera>() != null)
             {
-                SyncWithActiveChamber();
+                if (transform.localPosition.z > 0.34f)
+                {
+                    transform.localPosition = RevolverWeaponBuilder.DefaultViewmodelLocalPosition;
+                    transform.localRotation = Quaternion.Euler(RevolverWeaponBuilder.DefaultViewmodelLocalEuler);
+                }
             }
-            else
+
+            // Ensure MuzzlePoint is aligned with the upper barrel tip
+            Transform mp = transform.Find("MuzzlePoint");
+            if (mp != null)
             {
-                ApplyColorMode(currentMode);
+                MeshRenderer barrelRend = null;
+                if (_revolverModelTransform != null)
+                {
+                    foreach (var r in _revolverModelTransform.GetComponentsInChildren<MeshRenderer>(true))
+                    {
+                        if (r.gameObject.name.ToLower().Contains("barrel"))
+                        {
+                            barrelRend = r;
+                            break;
+                        }
+                    }
+                }
+                mp.localPosition = RevolverWeaponBuilder.CalculateBarrelTipLocalPosition(transform, barrelRend);
+
+                if (raycastWeapon != null)
+                {
+                    raycastWeapon.SetMuzzlePoint(mp);
+                }
+
+                if (impactFeedback != null)
+                {
+                    Light ml = mp.GetComponent<Light>();
+                    if (ml != null) impactFeedback.SetMuzzleLight(ml);
+                }
             }
         }
 
         private void OnEnable()
         {
+            ResolveDependencies();
+
             if (attackAction != null && attackAction.action != null)
             {
                 _resolvedAttackAction = attackAction.action;
@@ -102,6 +174,10 @@ namespace Recorded.Weapons
 
             if (ammoController != null)
             {
+                ammoController.OnActiveChamberChanged -= HandleActiveChamberChanged;
+                ammoController.OnChamberStateChanged -= HandleChamberStateChanged;
+                ammoController.OnCylinderReloaded -= HandleCylinderReloaded;
+
                 ammoController.OnActiveChamberChanged += HandleActiveChamberChanged;
                 ammoController.OnChamberStateChanged += HandleChamberStateChanged;
                 ammoController.OnCylinderReloaded += HandleCylinderReloaded;
@@ -125,6 +201,7 @@ namespace Recorded.Weapons
 
         private void Update()
         {
+            UpdateRecoilAnimation();
             CheckColorSwitchInput();
 
             if (CheckFireInput())
@@ -133,10 +210,40 @@ namespace Recorded.Weapons
             }
         }
 
+        private void UpdateRecoilAnimation()
+        {
+            if (_revolverModelTransform == null) return;
+
+            if (_currentRecoil > 0.0001f)
+            {
+                _currentRecoil = Mathf.MoveTowards(_currentRecoil, 0f, Time.deltaTime * recoilRecoverySpeed);
+                Vector3 recoilOffset = new Vector3(0f, _currentRecoil * 0.008f, -_currentRecoil * recoilKickbackZ);
+                // Because RevolverModel has localRotation Y=-90, local +Z of gunRoot corresponds to model recoil pitch around Z
+                Quaternion pitchRot = Quaternion.Euler(0f, 0f, -_currentRecoil * recoilKickUpPitch);
+                _revolverModelTransform.localPosition = _modelBaseLocalPos + recoilOffset;
+                _revolverModelTransform.localRotation = _modelBaseLocalRot * pitchRot;
+            }
+            else
+            {
+                _revolverModelTransform.localPosition = _modelBaseLocalPos;
+                _revolverModelTransform.localRotation = _modelBaseLocalRot;
+            }
+        }
+
+        private void TriggerRecoilImpulse(float strength = 1.0f)
+        {
+            _currentRecoil = Mathf.Clamp01(_currentRecoil + strength);
+        }
+
         private void CheckColorSwitchInput()
         {
+            if (rotationController == null)
+            {
+                rotationController = FindFirstObjectByType<Ammo.CylinderRotationController>();
+            }
+
             // If cylinder ammo system is present, mouse scroll wheel and Q/E rotate the cylinder!
-            if (rotationController != null && !rotationController.IsRotating)
+            if (rotationController != null)
             {
                 // 1. Mouse Scroll Wheel
                 if (Mouse.current != null)
@@ -144,12 +251,12 @@ namespace Recorded.Weapons
                     float scroll = Mouse.current.scroll.ReadValue().y;
                     if (scroll > 0.1f)
                     {
-                        rotationController.RotateLeft(); // Scroll UP (away) -> Previous chamber
+                        rotationController.RotateLeft(); // Scroll UP -> Previous/Left chamber
                         return;
                     }
                     else if (scroll < -0.1f)
                     {
-                        rotationController.RotateRight(); // Scroll DOWN (towards) -> Next chamber
+                        rotationController.RotateRight(); // Scroll DOWN -> Next/Right chamber
                         return;
                     }
                 }
@@ -224,7 +331,6 @@ namespace Recorded.Weapons
 
         private bool CheckFireInput()
         {
-            // 1. If an InputAction is bound, check it
             if (_resolvedAttackAction != null)
             {
                 return isAutomatic
@@ -232,7 +338,6 @@ namespace Recorded.Weapons
                     : _resolvedAttackAction.WasPressedThisFrame();
             }
 
-            // 2. Direct New Input System Mouse check (failsafe & standalone testing)
             if (Mouse.current != null)
             {
                 return isAutomatic
@@ -245,11 +350,13 @@ namespace Recorded.Weapons
 
         /// <summary>
         /// Execute shot if cooldown has elapsed and cylinder has ammo at the 6 o'clock firing position.
-        /// Consumes the round, fires raycast with matching color, and auto-advances the cylinder.
+        /// Consumes the round, fires raycast from exact MuzzlePoint with matching color, and auto-advances the cylinder.
         /// </summary>
         public bool AttemptFire()
         {
             if (Time.time < _nextFireTime) return false;
+
+            ResolveDependencies();
 
             if (rotationController != null && rotationController.IsRotating)
             {
@@ -263,7 +370,8 @@ namespace Recorded.Weapons
                 {
                     // Dry fire: Chamber at 6 o'clock is empty
                     Debug.Log("<color=#888888><b>[Spectrum Gun]</b> *CLICK* (Dry Fire) - 6 o'clock chamber is EMPTY. No shot fired, cylinder does not advance.</color>");
-                    _nextFireTime = Time.time + 0.25f; // Short dry-fire debounce
+                    TriggerRecoilImpulse(0.22f);
+                    _nextFireTime = Time.time + 0.22f; // Short dry-fire debounce
                     return false;
                 }
 
@@ -273,6 +381,7 @@ namespace Recorded.Weapons
                 }
 
                 _nextFireTime = Time.time + (1f / fireRate);
+                TriggerRecoilImpulse(1.0f);
 
                 Color firedColor = GetAmmoColor(firedAmmo);
                 if (impactFeedback != null)
@@ -308,7 +417,7 @@ namespace Recorded.Weapons
                             ? (hitInfo.point - muzzlePos).normalized
                             : transform.forward;
 
-                        // 1. Trigger immediate shot impact effects (e.g., RED Impulse) regardless of duplicate color timer
+                        // 1. Trigger immediate shot impact skills (RED Impulse, GREEN Bind, CYAN Stasis)
                         IColorShotImpact[] shotImpacts = hitInfo.collider.GetComponentsInParent<IColorShotImpact>();
                         if (shotImpacts != null)
                         {
@@ -355,6 +464,7 @@ namespace Recorded.Weapons
 
             // Fallback for standalone gun testing without cylinder
             _nextFireTime = Time.time + (1f / fireRate);
+            TriggerRecoilImpulse(1.0f);
 
             if (raycastWeapon == null) return false;
 
