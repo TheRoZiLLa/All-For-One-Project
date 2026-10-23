@@ -1,6 +1,6 @@
 {
   "name": "Recorded.Movement.Editor",
   "rootNamespace": "Recorded.Editor",
-  "references": ["Recorded.Movement", "Unity.InputSystem"],
+  "references": ["Recorded.Movement", "Unity.InputSystem", "Unity.RenderPipelines.Core.Runtime", "Unity.RenderPipelines.Universal.Runtime"],
   "includePlatforms": ["Editor"]
 }

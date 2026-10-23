@@ -10,16 +10,23 @@ namespace Recorded
         [SerializeField] private PlayerInputReader input;
         [SerializeField, Min(0f)] private float sensitivity = 0.1f;
         [SerializeField, Range(1f, 89f)] private float pitchLimit = 85f;
-        [Header("Walking camera")]
-        [SerializeField] private bool walkingMotion;
-        [SerializeField, Min(0f)] private float bobAmount = 0.012f;
-        [SerializeField, Min(0.1f)] private float strideLength = 0.75f;
+        [Header("Stair camera")]
         [Tooltip("Seconds to soften stair movement. Zero disables smoothing.")]
         [SerializeField, Min(0f)] private float stepSmoothing = 0.08f;
+        [Header("Gentle camera motion")]
+        [SerializeField] private bool enableBob;
+        [SerializeField, Range(0f, 0.02f)] private float bobAmount = 0.006f;
+        [SerializeField, Range(0.1f, 4f)] private float bobFrequency = 1.6f;
+        [SerializeField] private bool enableTilt;
+        [SerializeField, Range(0f, 5f)] private float strafeTilt = 1.5f;
+        [SerializeField, Min(0.01f)] private float motionSmoothTime = 0.14f;
         private FirstPersonMotor motor;
         private Camera viewCamera;
         private Vector3 viewHome;
-        private float previousRootY, stairOffset, gaitPhase, gaitWeight;
+        private Quaternion viewRotation;
+        private Vector3 bobOffset, bobVelocity;
+        private float bobPhase, roll, rollVelocity;
+        private float previousRootY, stairOffset;
         private bool wasGrounded;
         public float Pitch { get; private set; }
 
@@ -35,15 +42,25 @@ namespace Recorded
             Pitch = Mathf.DeltaAngle(0f, cameraPivot.localEulerAngles.x);
             motor = GetComponent<FirstPersonMotor>();
             viewCamera = cameraPivot.GetComponentInChildren<Camera>();
-            if (viewCamera != null) viewHome = viewCamera.transform.localPosition;
+            if (viewCamera != null)
+            {
+                viewHome = viewCamera.transform.localPosition;
+                viewRotation = viewCamera.transform.localRotation;
+            }
             previousRootY = transform.position.y;
         }
 
         private void OnEnable() => SetCursor(true);
         private void OnDisable()
         {
-            if (viewCamera != null) viewCamera.transform.localPosition = viewHome;
-            stairOffset = gaitWeight = 0f;
+            if (viewCamera != null)
+            {
+                viewCamera.transform.localPosition = viewHome;
+                viewCamera.transform.localRotation = viewRotation;
+            }
+            bobOffset = bobVelocity = Vector3.zero;
+            bobPhase = roll = rollVelocity = 0f;
+            stairOffset = 0f;
             wasGrounded = false;
             SetCursor(false);
         }
@@ -81,22 +98,33 @@ namespace Recorded
             wasGrounded = motor.IsGrounded;
             stairOffset = stepSmoothing > 0f ? stairOffset * Mathf.Exp(-deltaTime / stepSmoothing) : 0f;
 
-            float horizontalSpeed = new Vector2(motor.Velocity.x, motor.Velocity.z).magnitude;
-            float gaitSpeed = Mathf.Min(horizontalSpeed, motor.ControlledSpeed);
-            bool walking = walkingMotion && motor.IsGrounded && gaitSpeed > 0.05f;
-            float weight = walking ? Mathf.Min(1f, gaitSpeed / Mathf.Max(0.1f, settings.WalkSpeed))
-                * (motor.IsCrouching ? 0.5f : 1f) : 0f;
-            gaitWeight = Mathf.MoveTowards(gaitWeight, weight, deltaTime * 8f);
-            if (walking)
-                gaitPhase = Mathf.Repeat(gaitPhase + gaitSpeed / Mathf.Max(0.1f, strideLength)
-                    * Mathf.PI * deltaTime, Mathf.PI * 2f);
-            Vector3 offset = new Vector3(Mathf.Sin(gaitPhase) * 0.5f, Mathf.Cos(gaitPhase * 2f), 0f)
-                * bobAmount * gaitWeight;
+            Vector3 controlled = transform.InverseTransformDirection(motor.ControlledVelocity);
+            float speed = Mathf.Min(new Vector2(motor.Velocity.x, motor.Velocity.z).magnitude,
+                new Vector2(controlled.x, controlled.z).magnitude);
+            bool walking = motor.IsGrounded && speed > 0.05f;
+            float weight = walking ? Mathf.Clamp01(speed / Mathf.Max(0.1f, settings.WalkSpeed)) : 0f;
+            Vector3 targetBob = Vector3.zero;
+            if (enableBob && walking)
+            {
+                // Keep cadence comfortable at FPS movement speeds; do not count metres as footsteps.
+                float cadence = bobFrequency * Mathf.Clamp(speed / Mathf.Max(0.1f, settings.WalkSpeed), 0.65f, 1.35f);
+                bobPhase = Mathf.Repeat(bobPhase + cadence * Mathf.PI * 2f * deltaTime, Mathf.PI * 4f);
+                targetBob = new Vector3(Mathf.Sin(bobPhase * 0.5f) * 0.4f, Mathf.Sin(bobPhase), 0f)
+                    * (bobAmount * weight * (motor.IsCrouching ? 0.5f : 1f));
+            }
+            float smoothTime = Mathf.Max(0.01f, motionSmoothTime);
+            bobOffset = Vector3.SmoothDamp(bobOffset, targetBob, ref bobVelocity, smoothTime, Mathf.Infinity, deltaTime);
+            float targetRoll = enableTilt && walking
+                ? -Mathf.Clamp(controlled.x / Mathf.Max(0.1f, settings.WalkSpeed), -1f, 1f) * strafeTilt : 0f;
+            roll = Mathf.SmoothDamp(roll, targetRoll, ref rollVelocity, smoothTime, Mathf.Infinity, deltaTime);
+
             // Keep the eye and its near plane below the capsule top, including on descending stairs.
             float headroom = Mathf.Max(0f, settings.EyeInset - viewCamera.nearClipPlane - settings.SkinWidth - 0.02f);
             stairOffset = Mathf.Clamp(stairOffset, -settings.StepHeight, headroom);
+            Vector3 offset = bobOffset;
             offset.y = Mathf.Clamp(offset.y + stairOffset, -settings.StepHeight, headroom);
             viewCamera.transform.localPosition = viewHome + offset;
+            viewCamera.transform.localRotation = viewRotation * Quaternion.Euler(0f, 0f, roll);
         }
 
         private static void SetCursor(bool locked)

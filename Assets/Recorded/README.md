@@ -19,6 +19,7 @@ Do not put the player under a scaled or tilted parent.
 Player: CharacterController, PlayerInputReader, FirstPersonLook, FirstPersonMotor
   CameraPivot
     MainCamera: Camera, AudioListener
+  Camera Effects: global Volume with PlayerCameraProfile
 ```
 
 References and capsule dimensions are already assigned in the prefab.
@@ -37,6 +38,7 @@ MovementSetup in the Editor folder generated the assets through Unity APIs.
 - Three assembly definitions isolate runtime, Editor and test code.
 - `Input/RecordedInput.inputactions`, `Prefabs/Player.prefab`, `Scenes/MovementSandbox.unity`
   and `Materials/Floor.mat`, `Materials/Obstacles.mat`: playable assets.
+- `Settings/PlayerCameraProfile.asset`: a dedicated, mild camera-motion blur override.
 - Unity-generated `.meta` files retain all asset references.
 
 ## Defaults and tuning
@@ -58,8 +60,10 @@ Select Player > FirstPersonMotor > Settings. Values are local to each prefab ins
 | Ground / air impulse damping | 5 / 0.8 per second |
 | Mouse sensitivity / pitch limit | 0.1 degrees per pixel / ±85° |
 | Camera FOV / near clip | 75° / 0.03 m |
-| Walking bob amount / stride length | 0.012 / 0.75 m |
 | Stair camera smoothing | 0.08 s |
+| Bob amount / cadence | 0.006 m / 1.6 Hz at walk speed |
+| Maximum strafe tilt / motion smoothing | 1.5° / 0.14 s |
+| Motion blur intensity / clamp | 0.12 / 0.025 |
 
 Increase acceleration for faster turns; increase deceleration for faster stops.
 Lower gravity magnitude for a slower jump. Jump height remains independent of gravity.
@@ -67,11 +71,21 @@ Reduce impulse damping for longer knockback. Zero damping preserves external vel
 Edit capsule dimensions before entering Play; initialization applies dimensions to CharacterController.
 CameraPivot height follows the collision capsule throughout crouch transitions.
 The camera softens vertical stair movement without delaying mouse look or moving the collision capsule.
-The Player prefab enables subtle walking bob, driven by controlled speed and actual horizontal movement.
-Bob fades out when idle or airborne, is reduced while crouching, and is not driven by knockback alone.
-Disable `FirstPersonLook > Walking Motion` to remove bob; set `Step Smoothing` to zero to remove stair smoothing.
-Walking Motion stays off by default on newly added components and is enabled in the provided prefab.
-Camera offsets stay below the capsule top. No roll or automatic FOV changes are applied.
+The Player prefab enables a small, damped walking bob and a gentle roll when strafing.
+Cadence stays between 0.65 and 1.35 times the base rate; crouching halves the bob amount.
+Bob and roll ease back to rest when stopped or airborne, and do not respond to knockback alone.
+`FirstPersonLook > Gentle Camera Motion` exposes separate Enable Bob and Enable Tilt switches,
+amplitude, frequency, maximum tilt and smoothing time. Newly added components leave the switches off.
+Set `FirstPersonLook > Step Smoothing` to zero to remove stair smoothing.
+Camera offsets stay below the capsule top. Mouse yaw/pitch stay immediate; no FOV pumping is applied.
+
+The prefab's `Camera Effects` child is a global Volume on Default layer with priority 10.
+It uses `Assets/Recorded/Settings/PlayerCameraProfile.asset`, containing only Motion Blur:
+CameraOnly mode, Medium quality, intensity 0.12, clamp 0.025. Its parameters override the defaults.
+MainCamera has URP post-processing enabled and includes Default in its Volume Layer Mask.
+View this effect in Game view. Lower Intensity or disable the Motion Blur override to remove blur.
+Other lighting and color profiles are preserved. `MovementSetup.ConfigureCameraEffects` creates
+the same setup when generating a fresh Player prefab.
 
 Edit `Assets/Recorded/Input/RecordedInput.inputactions` to change bindings.
 It is a dedicated copy of the project's existing actions, with crouch changed to Left Ctrl.
@@ -100,13 +114,17 @@ This API separates input from execution; it does not promise deterministic physi
 
 ## Checks and limits
 
-On 2026-10-23, Unity Test Runner passed all 24 PlayMode cases on Unity 6000.3.27f1.
+On 2026-10-24, Unity Test Runner passed all 27 PlayMode cases on Unity 6000.3.27f1.
 The full six-tread sandbox staircase was also checked directly through MCP with the saved Player prefab:
 walking, sprinting and crouching all reached the 1.2 m top and cleared the flight at 30, 60 and 144 FPS.
 The previous stair failure came from the ground probe missing rounded stair edges and input speed
 being erased on contact with a riser. A grounded-only ray fallback now confirms the floor under the
 capsule, and CharacterController resolves input collisions without resetting the requested movement speed.
-Camera tests cover small walking bob, return to rest, knockback without bob, headroom and stair smoothing.
+Camera tests cover disabled effects, bounded and damped bob/tilt at 30/60/144 FPS,
+direction reversals, return to rest, knockback without footsteps, immediate mouse look,
+headroom and stair smoothing.
+The saved Player prefab was also checked in Play Mode: its camera resolved the dedicated
+Motion Blur override in the Volume stack at intensity 0.12 / clamp 0.025, and rendered a Game view capture.
 Two pre-existing Package Manager `ScriptableSingleton already exists` errors remain in the Console;
 no movement errors were logged during these checks.
 

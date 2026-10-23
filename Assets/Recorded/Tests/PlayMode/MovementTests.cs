@@ -265,22 +265,21 @@ namespace Recorded.Tests
         }
 
         [Test]
-        public void CameraMotion_WalkingHasSmallGait_IdleAndKnockbackHaveNone()
+        public void CameraMotion_RemainsStillWhileWalking_IdleAndKnockback()
         {
             var look = player.GetComponent<FirstPersonLook>();
             var view = player.GetComponentInChildren<Camera>().transform;
-            SetField(look, "walkingMotion", true);
             var updateView = typeof(FirstPersonLook).GetMethod("UpdateCameraMotion", BindingFlags.NonPublic | BindingFlags.Instance);
-            float maximumBob = 0f;
+            float maximumOffset = 0f;
             for (int i = 0; i < 60; i++)
             {
                 motor.Simulate(new MovementInput(Vector2.up), 1f / 60f);
                 updateView.Invoke(look, new object[] { 1f / 60f });
-                maximumBob = Mathf.Max(maximumBob, Mathf.Abs(view.localPosition.y));
+                maximumOffset = Mathf.Max(maximumOffset, view.localPosition.magnitude);
                 Assert.That(view.position.y - player.transform.position.y + 0.03f,
                     Is.LessThan(capsule.height - motor.Settings.SkinWidth));
             }
-            Assert.That(maximumBob, Is.GreaterThan(0.005f).And.LessThan(0.015f));
+            Assert.That(maximumOffset, Is.LessThan(0.002f));
             for (int i = 0; i < 60; i++)
             {
                 motor.Simulate(default, 1f / 60f);
@@ -321,6 +320,63 @@ namespace Recorded.Tests
             Assert.That(largestViewRise, Is.LessThan(largestRootRise * 0.9f));
             Assert.That(capsule.height, Is.EqualTo(motor.Settings.StandingHeight));
             Assert.That(look.Pitch, Is.EqualTo(0f));
+        }
+
+        [TestCase(30)]
+        [TestCase(60)]
+        [TestCase(144)]
+        public void CameraMotion_GentleBobAndTilt_AreBoundedAndSettle(int fps)
+        {
+            var look = player.GetComponent<FirstPersonLook>();
+            var view = player.GetComponentInChildren<Camera>().transform;
+            var updateView = typeof(FirstPersonLook).GetMethod("UpdateCameraMotion", BindingFlags.NonPublic | BindingFlags.Instance);
+            SetField(look, "enableBob", true);
+            SetField(look, "enableTilt", true);
+            float dt = 1f / fps, peakOffset = 0f, peakRoll = 0f;
+            Vector3 previous = view.localPosition;
+            float previousRoll = 0f;
+            for (int i = 0; i < fps * 2; i++)
+            {
+                motor.Simulate(new MovementInput(i < fps ? Vector2.right : Vector2.left), dt);
+                updateView.Invoke(look, new object[] { dt });
+                float currentRoll = Mathf.DeltaAngle(0f, view.localEulerAngles.z);
+                peakOffset = Mathf.Max(peakOffset, view.localPosition.magnitude);
+                peakRoll = Mathf.Max(peakRoll, Mathf.Abs(currentRoll));
+                Assert.That(Vector3.Distance(previous, view.localPosition) / dt, Is.LessThan(0.07f), "Bob must not snap.");
+                Assert.That(Mathf.Abs(currentRoll - previousRoll) / dt, Is.LessThan(35f), "Tilt must not snap when reversing.");
+                Assert.That(Mathf.Abs(currentRoll), Is.LessThanOrEqualTo(1.52f));
+                Assert.That(view.position.y - player.transform.position.y + 0.03f,
+                    Is.LessThan(capsule.height - motor.Settings.SkinWidth));
+                previous = view.localPosition;
+                previousRoll = currentRoll;
+            }
+            Assert.That(peakOffset, Is.GreaterThan(0.0007f).And.LessThan(0.009f));
+            Assert.That(peakRoll, Is.GreaterThan(1f));
+            look.ApplyLook(new Vector2(20f, 10f));
+            Assert.That(look.Pitch, Is.EqualTo(-1f).Within(0.001f), "Mouse look stays immediate.");
+            for (int i = 0; i < fps * 2; i++)
+            {
+                motor.Simulate(default, dt);
+                updateView.Invoke(look, new object[] { dt });
+            }
+            Assert.That(view.localPosition.magnitude, Is.LessThan(0.0001f));
+            Assert.That(Mathf.Abs(Mathf.DeltaAngle(0f, view.localEulerAngles.z)), Is.LessThan(0.005f));
+            motor.ApplyImpulse(Vector3.right * 8f);
+            for (int i = 0; i < fps / 2; i++)
+            {
+                motor.Simulate(default, dt);
+                updateView.Invoke(look, new object[] { dt });
+                Assert.That(view.localPosition.magnitude, Is.LessThan(0.0001f), "Knockback alone must not add footsteps.");
+            }
+            SetField(look, "enableBob", false);
+            SetField(look, "enableTilt", false);
+            for (int i = 0; i < fps; i++)
+            {
+                motor.Simulate(new MovementInput(Vector2.right), dt);
+                updateView.Invoke(look, new object[] { dt });
+            }
+            Assert.That(view.localPosition.magnitude, Is.LessThan(0.0001f));
+            Assert.That(Mathf.Abs(Mathf.DeltaAngle(0f, view.localEulerAngles.z)), Is.LessThan(0.005f));
         }
 
         [Test]

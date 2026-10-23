@@ -23,7 +23,7 @@ namespace Recorded
         public PlayerMovementSettings Settings => settings;
         public Vector3 Velocity { get; private set; }
         public Vector3 ExternalVelocity => externalVelocity;
-        public float ControlledSpeed => movementVelocity.magnitude;
+        public Vector3 ControlledVelocity => movementVelocity;
         public bool IsGrounded { get; private set; }
         public bool IsCrouching { get; private set; }
         public bool IsSprinting { get; private set; }

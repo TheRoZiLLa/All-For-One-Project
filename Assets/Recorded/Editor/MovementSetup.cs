@@ -4,6 +4,8 @@ using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using UnityEngine.Rendering;
+using UnityEngine.Rendering.Universal;
 
 namespace Recorded.Editor
 {
@@ -12,6 +14,7 @@ namespace Recorded.Editor
         private const string Root = "Assets/Recorded";
         public const string PrefabPath = Root + "/Prefabs/Player.prefab";
         public const string ScenePath = Root + "/Scenes/MovementSandbox.unity";
+        public const string CameraProfilePath = Root + "/Settings/PlayerCameraProfile.asset";
 
         [MenuItem("RECORDED/Create Movement Assets")]
         public static void CreateAssets()
@@ -52,9 +55,6 @@ namespace Recorded.Editor
                 SetReference(input, "inputActions", actions);
                 SetReference(look, "input", input);
                 SetReference(look, "cameraPivot", pivot);
-                var lookSettings = new SerializedObject(look);
-                lookSettings.FindProperty("walkingMotion").boolValue = true;
-                lookSettings.ApplyModifiedPropertiesWithoutUndo();
                 SetReference(motor, "input", input);
                 SetReference(motor, "cameraPivot", pivot);
                 var capsule = player.GetComponent<CharacterController>();
@@ -65,6 +65,7 @@ namespace Recorded.Editor
                 capsule.stepOffset = 0.3f;
                 capsule.slopeLimit = 50f;
                 capsule.minMoveDistance = 0f;
+                ConfigureCameraEffects(player);
                 var prefab = PrefabUtility.SaveAsPrefabAsset(player, PrefabPath);
                 UnityEngine.Object.DestroyImmediate(player);
                 var instance = (GameObject)PrefabUtility.InstantiatePrefab(prefab, sandbox);
@@ -100,6 +101,55 @@ namespace Recorded.Editor
                 SceneManager.SetActiveScene(previous);
                 EditorSceneManager.CloseScene(sandbox, true);
             }
+        }
+
+        public static void ConfigureCameraEffects(GameObject player)
+        {
+            var look = new SerializedObject(player.GetComponent<FirstPersonLook>());
+            look.FindProperty("enableBob").boolValue = true;
+            look.FindProperty("enableTilt").boolValue = true;
+            look.ApplyModifiedPropertiesWithoutUndo();
+            var camera = player.GetComponentInChildren<Camera>();
+            var data = camera.GetComponent<UniversalAdditionalCameraData>();
+            if (data == null) data = camera.gameObject.AddComponent<UniversalAdditionalCameraData>();
+            data.renderPostProcessing = true;
+            data.volumeLayerMask |= 1;
+            if (!AssetDatabase.IsValidFolder(Root + "/Settings")) AssetDatabase.CreateFolder(Root, "Settings");
+            var profile = AssetDatabase.LoadAssetAtPath<VolumeProfile>(CameraProfilePath);
+            if (profile == null)
+            {
+                profile = ScriptableObject.CreateInstance<VolumeProfile>();
+                AssetDatabase.CreateAsset(profile, CameraProfilePath);
+            }
+            if (!profile.TryGet<MotionBlur>(out var blur))
+            {
+                blur = profile.Add<MotionBlur>(true);
+                AssetDatabase.AddObjectToAsset(blur, profile);
+            }
+            blur.active = true;
+            blur.mode.Override(MotionBlurMode.CameraOnly);
+            blur.quality.Override(MotionBlurQuality.Medium);
+            blur.intensity.Override(0.12f);
+            blur.clamp.Override(0.025f);
+            EditorUtility.SetDirty(blur);
+            EditorUtility.SetDirty(profile);
+            AssetDatabase.SaveAssetIfDirty(profile);
+            var effects = player.transform.Find("Camera Effects");
+            if (effects == null)
+            {
+                effects = new GameObject("Camera Effects", typeof(Volume)).transform;
+                effects.SetParent(player.transform, false);
+            }
+            var volume = effects.GetComponent<Volume>();
+            if (volume == null) volume = effects.gameObject.AddComponent<Volume>();
+            effects.gameObject.layer = 0;
+            volume.enabled = true;
+            volume.weight = 1f;
+            volume.isGlobal = true;
+            volume.priority = 10f;
+            volume.sharedProfile = profile;
+            Debug.Assert(blur.IsActive() && data.renderPostProcessing && volume.sharedProfile == profile,
+                "Player camera post-processing configuration is incomplete.");
         }
 
         private static void SetReference(UnityEngine.Object target, string field, UnityEngine.Object value)
