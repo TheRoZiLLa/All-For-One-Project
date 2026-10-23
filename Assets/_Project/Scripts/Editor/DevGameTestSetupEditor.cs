@@ -1,4 +1,4 @@
-using UnityEditor;
+﻿using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -14,7 +14,7 @@ namespace Recorded.EditorTools
 
         static DevGameTestSetupEditor()
         {
-            EditorApplication.delayCall += AutoSetupIfDevGameTestActive;
+            // Manual invocation via RECORDED menu or Inspector button prevents unexpected scene dirtying on domain reload.
         }
 
         private static void AutoSetupIfDevGameTestActive()

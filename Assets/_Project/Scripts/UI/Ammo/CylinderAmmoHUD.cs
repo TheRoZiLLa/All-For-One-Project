@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -94,16 +94,30 @@ namespace Recorded.Weapons.Ammo
         /// </summary>
         public void BuildHUDHierarchy()
         {
-            if (_rootContainer != null) return; // Already built
+            if (_rootContainer != null && _chamberVisuals != null && _chamberVisuals.Length == CylinderAmmoController.CylinderCapacity && _chamberVisuals[0].root != null)
+            {
+                return; // Already built and valid in this session
+            }
 
-            // 1. Ensure Canvas exists
+            // 1. Ensure fresh Canvas
             Canvas canvas = GetComponentInParent<Canvas>();
             if (canvas == null)
             {
-                Transform existingCanvas = transform.Find("CylinderAmmo_Canvas");
-                if (existingCanvas != null)
+                for (int c = transform.childCount - 1; c >= 0; c--)
                 {
-                    DestroyImmediate(existingCanvas.gameObject);
+                    Transform child = transform.GetChild(c);
+                    if (child.name == "CylinderAmmo_Canvas")
+                    {
+                        if (Application.isPlaying)
+                        {
+                            child.gameObject.SetActive(false);
+                            Destroy(child.gameObject);
+                        }
+                        else
+                        {
+                            DestroyImmediate(child.gameObject);
+                        }
+                    }
                 }
 
                 GameObject canvasObj = new GameObject("CylinderAmmo_Canvas");

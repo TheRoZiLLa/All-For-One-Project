@@ -1,11 +1,11 @@
-using UnityEngine;
+﻿using UnityEngine;
 using UnityEngine.UI;
 
 namespace Recorded.UI
 {
     /// <summary>
     /// Generates and manages a crisp, resolution-independent First-Person crosshair at the screen center.
-    /// Can automatically build its UI hierarchy if none is assigned in the Inspector.
+    /// Automatically builds or rebinds its UI hierarchy without creating duplicate canvases.
     /// </summary>
     public class CrosshairUI : MonoBehaviour
     {
@@ -24,9 +24,32 @@ namespace Recorded.UI
             EnsureCrosshairHierarchy();
         }
 
-        private void EnsureCrosshairHierarchy()
+        public void EnsureCrosshairHierarchy()
         {
-            // Check if Canvas exists on parent or in scene
+            if (_rootContainer != null) return;
+
+            Transform existingReticle = transform.Find("Crosshair_Canvas/Crosshair_Reticle");
+            if (existingReticle != null)
+            {
+                _rootContainer = existingReticle.GetComponent<RectTransform>();
+                if (_rootContainer != null)
+                {
+                    SetCrosshairColor(crosshairColor);
+                    return;
+                }
+            }
+
+            // Clean up any partial old canvas under this transform
+            Transform oldCanvas = transform.Find("Crosshair_Canvas");
+            if (oldCanvas != null)
+            {
+                if (Application.isPlaying)
+                    Destroy(oldCanvas.gameObject);
+                else
+                    DestroyImmediate(oldCanvas.gameObject);
+            }
+
+            // Check if Canvas exists on parent or create one
             Canvas canvas = GetComponentInParent<Canvas>();
             if (canvas == null)
             {
@@ -92,9 +115,14 @@ namespace Recorded.UI
         public void SetCrosshairColor(Color color)
         {
             crosshairColor = color;
+            if (_rootContainer == null)
+            {
+                Transform existingReticle = transform.Find("Crosshair_Canvas/Crosshair_Reticle");
+                if (existingReticle != null) _rootContainer = existingReticle.GetComponent<RectTransform>();
+            }
             if (_rootContainer == null) return;
 
-            Image[] images = _rootContainer.GetComponentsInChildren<Image>();
+            Image[] images = _rootContainer.GetComponentsInChildren<Image>(true);
             foreach (var img in images)
             {
                 img.color = color;

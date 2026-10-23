@@ -1,48 +1,39 @@
 ﻿using UnityEngine;
 using UnityEditor;
-using UnityEditor.SceneManagement;
-using UnityEngine.SceneManagement;
 using Recorded.Testing.Editor;
 
 namespace Recorded.EditorTools
 {
+    /// <summary>
+    /// Provides menu utilities to inspect or rebuild the Sci-Fi Revolver prefab and scene setup on demand.
+    /// Does not auto-mutate or auto-save scenes during background reloads or Play Mode transitions.
+    /// </summary>
     [InitializeOnLoad]
-    public static class RevolverSceneSetupOnLoad
+    public static class RevolverSceneSetupMenu
     {
-        private const string ScenePath = "Assets/_Project/Scenes/Dev GameTest.unity";
+        private const string VerifyKey = "RECORDED_VERIFY_CLEAN_V1";
 
-        static RevolverSceneSetupOnLoad()
+        static RevolverSceneSetupMenu()
         {
-            EditorApplication.update += CheckAndExecute;
-            EditorApplication.playModeStateChanged += OnPlayModeChanged;
-        }
-
-        private static void OnPlayModeChanged(PlayModeStateChange state)
-        {
-            if (state == PlayModeStateChange.EnteredEditMode)
+            if (!SessionState.GetBool(VerifyKey, false))
             {
-                EditorApplication.update += CheckAndExecute;
+                SessionState.SetBool(VerifyKey, true);
+                EditorApplication.delayCall += () =>
+                {
+                    if (!EditorApplication.isPlayingOrWillChangePlaymode)
+                    {
+                        RGBColorSystemVerificationTests.RunAllTests();
+                    }
+                };
             }
         }
 
-        private static void CheckAndExecute()
+        [MenuItem("RECORDED/Rebuild Sci-Fi Revolver Prefab & Scene Setup", false, 2)]
+        public static void ExecuteManualSetup()
         {
             if (EditorApplication.isPlayingOrWillChangePlaymode) return;
-            EditorApplication.update -= CheckAndExecute;
-            ExecuteSetup();
-        }
-
-        private static void ExecuteSetup()
-        {
-            if (EditorApplication.isPlayingOrWillChangePlaymode) return;
-
-            Scene activeScene = SceneManager.GetActiveScene();
-            if (activeScene.isLoaded && (activeScene.name == "Dev GameTest" || activeScene.path == ScenePath || activeScene.path.Contains("Dev GameTest")))
-            {
-                RevolverSetupUtility.CreateOrUpdateRevolverPrefab();
-                RevolverSetupUtility.SetupRevolverInActiveScene(true);
-                RGBColorSystemVerificationTests.RunAllTests();
-            }
+            RevolverSetupUtility.CreateOrUpdateRevolverPrefab();
+            RevolverSetupUtility.SetupRevolverInActiveScene(true);
         }
     }
 }
