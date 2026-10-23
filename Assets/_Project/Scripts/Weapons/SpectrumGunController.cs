@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
+using Recorded.ColorSystem;
 
 namespace Recorded.Weapons
 {
@@ -274,6 +275,21 @@ namespace Recorded.Weapons
                     impactFeedback.SetFeedbackColor(firedColor);
                 }
 
+                // Map fired ammo type to RGB object color state
+                ObjectColorState shotColorState = ObjectColorState.None;
+                switch (firedAmmo)
+                {
+                    case Ammo.AmmoType.Red:
+                        shotColorState = ObjectColorState.Red;
+                        break;
+                    case Ammo.AmmoType.Green:
+                        shotColorState = ObjectColorState.Green;
+                        break;
+                    case Ammo.AmmoType.Cyan:
+                        shotColorState = ObjectColorState.Blue; // Cyan ammo maps to primary Blue flag
+                        break;
+                }
+
                 if (raycastWeapon != null)
                 {
                     Transform muzzle = raycastWeapon.MuzzlePoint;
@@ -281,20 +297,33 @@ namespace Recorded.Weapons
 
                     bool hit = raycastWeapon.FireRaycast(out RaycastHit hitInfo, out Vector3 targetPoint);
 
-                    if (impactFeedback != null)
+                    if (hit)
                     {
-                        if (hit)
+                        // Apply color state to hit target
+                        if (shotColorState != ObjectColorState.None)
+                        {
+                            IColorReceivable target = hitInfo.collider.GetComponentInParent<IColorReceivable>();
+                            if (target != null)
+                            {
+                                target.ApplyColor(shotColorState);
+                            }
+                        }
+
+                        if (impactFeedback != null)
                         {
                             impactFeedback.PlayHitFeedback(muzzlePos, hitInfo);
                         }
-                        else
+                    }
+                    else
+                    {
+                        if (impactFeedback != null)
                         {
                             impactFeedback.PlayMissFeedback(muzzlePos, targetPoint);
                         }
                     }
                 }
 
-                Debug.Log($"<color=#{ColorUtility.ToHtmlStringRGB(firedColor)}><b>[Spectrum Gun]</b> Fired <b>{firedAmmo.ToString().ToUpper()}</b> round from 12 o'clock chamber! Auto-advancing cylinder...</color>");
+                Debug.Log($"<color=#{ColorUtility.ToHtmlStringRGB(firedColor)}><b>[Spectrum Gun]</b> Fired <b>{firedAmmo.ToString().ToUpper()}</b> round from active chamber! Auto-advancing cylinder...</color>");
 
                 // Automatically advance the cylinder to the next chamber following a successful shot
                 if (rotationController != null)
@@ -310,18 +339,38 @@ namespace Recorded.Weapons
 
             if (raycastWeapon == null) return false;
 
+            ObjectColorState fallbackState = ObjectColorState.None;
+            switch (currentMode)
+            {
+                case SpectrumColorMode.Red: fallbackState = ObjectColorState.Red; break;
+                case SpectrumColorMode.Green: fallbackState = ObjectColorState.Green; break;
+                case SpectrumColorMode.Blue: fallbackState = ObjectColorState.Blue; break;
+            }
+
             Transform fallbackMuzzle = raycastWeapon.MuzzlePoint;
             Vector3 fallbackMuzzlePos = fallbackMuzzle != null ? fallbackMuzzle.position : transform.position;
 
             bool fallbackHit = raycastWeapon.FireRaycast(out RaycastHit fallbackHitInfo, out Vector3 fallbackTargetPoint);
 
-            if (impactFeedback != null)
+            if (fallbackHit)
             {
-                if (fallbackHit)
+                if (fallbackState != ObjectColorState.None)
+                {
+                    IColorReceivable target = fallbackHitInfo.collider.GetComponentInParent<IColorReceivable>();
+                    if (target != null)
+                    {
+                        target.ApplyColor(fallbackState);
+                    }
+                }
+
+                if (impactFeedback != null)
                 {
                     impactFeedback.PlayHitFeedback(fallbackMuzzlePos, fallbackHitInfo);
                 }
-                else
+            }
+            else
+            {
+                if (impactFeedback != null)
                 {
                     impactFeedback.PlayMissFeedback(fallbackMuzzlePos, fallbackTargetPoint);
                 }

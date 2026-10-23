@@ -67,26 +67,30 @@ namespace Recorded.Weapons
                 ? playerCamera.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0f))
                 : new Ray(transform.position, transform.forward);
 
-            bool hit = Physics.Raycast(ray, out hitInfo, maxRange, hitLayers, triggerInteraction);
-
-            if (hit)
+            RaycastHit[] hits = Physics.RaycastAll(ray, maxRange, hitLayers, triggerInteraction);
+            if (hits != null && hits.Length > 0)
             {
-                targetPoint = hitInfo.point;
-                OnTargetHit?.Invoke(hitInfo);
-
-                // Check if target is a TestTarget
-                if (hitInfo.collider.TryGetComponent<Testing.TestTarget>(out var testTarget))
+                System.Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
+                for (int i = 0; i < hits.Length; i++)
                 {
-                    testTarget.NotifyHit(hitInfo);
+                    // Ignore self / shooter's own character controller or body
+                    if (hits[i].transform.root == transform.root)
+                    {
+                        continue;
+                    }
+
+                    hitInfo = hits[i];
+                    targetPoint = hitInfo.point;
+                    OnTargetHit?.Invoke(hitInfo);
+
+                    return true;
                 }
             }
-            else
-            {
-                targetPoint = ray.origin + (ray.direction * maxRange);
-                OnTargetMiss?.Invoke(ray.origin, ray.direction);
-            }
 
-            return hit;
+            hitInfo = default;
+            targetPoint = ray.origin + (ray.direction * maxRange);
+            OnTargetMiss?.Invoke(ray.origin, ray.direction);
+            return false;
         }
 
         public void SetCamera(Camera cam)
