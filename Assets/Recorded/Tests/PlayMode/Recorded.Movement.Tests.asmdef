@@ -1,0 +1,6 @@
+{
+  "name": "Recorded.Movement.Tests",
+  "rootNamespace": "Recorded.Tests",
+  "references": ["Recorded.Movement", "Unity.InputSystem"],
+  "optionalUnityReferences": ["TestAssemblies"]
+}

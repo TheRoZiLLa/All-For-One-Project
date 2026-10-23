@@ -1,0 +1,5 @@
+{
+  "name": "Recorded.Movement",
+  "rootNamespace": "Recorded",
+  "references": ["Unity.InputSystem"]
+}

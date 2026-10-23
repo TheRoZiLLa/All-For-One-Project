@@ -1,0 +1,6 @@
+{
+  "name": "Recorded.Movement.Editor",
+  "rootNamespace": "Recorded.Editor",
+  "references": ["Recorded.Movement", "Unity.InputSystem"],
+  "includePlatforms": ["Editor"]
+}
