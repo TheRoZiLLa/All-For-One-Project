@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 using Recorded.Weapons;
 using Recorded.UI;
 using Recorded.ColorSystem;
@@ -32,6 +32,61 @@ namespace Recorded.Testing
             if (autoBuildIfMissing)
             {
                 SetupTestEnvironment();
+            }
+        }
+
+        private void Start()
+        {
+            LogGunDiagnostics();
+        }
+
+        private void Update()
+        {
+            if (UnityEngine.InputSystem.Keyboard.current != null)
+            {
+                if (UnityEngine.InputSystem.Keyboard.current.f1Key.wasPressedThisFrame ||
+                    UnityEngine.InputSystem.Keyboard.current.pKey.wasPressedThisFrame)
+                {
+                    Camera cam = Camera.main;
+                    Transform existingGun = cam != null ? cam.transform.Find("SpectrumGun") : null;
+                    if (existingGun != null)
+                    {
+                        RevolverWeaponBuilder.BuildRevolver(existingGun, out Transform mp, out Light ml);
+                        RaycastWeapon rw = existingGun.GetComponent<RaycastWeapon>();
+                        if (rw != null) rw.SetMuzzlePoint(mp);
+                        WeaponImpactFeedback fb = existingGun.GetComponent<WeaponImpactFeedback>();
+                        if (fb != null) fb.SetMuzzleLight(ml);
+                        LogGunDiagnostics();
+                    }
+                }
+            }
+        }
+
+        public void LogGunDiagnostics()
+        {
+            Camera cam = Camera.main;
+            Debug.Log($"<color=#FFFF00>[GunDiagnostics] Camera.main: {cam?.name}, pos: {cam?.transform.position}, fov: {cam?.fieldOfView}, near: {cam?.nearClipPlane}, far: {cam?.farClipPlane}, cullingMask: {cam?.cullingMask}</color>");
+
+            SpectrumGunController gun = FindFirstObjectByType<SpectrumGunController>();
+            if (gun == null)
+            {
+                Debug.LogError("<color=#FF0000>[GunDiagnostics] SpectrumGunController NOT FOUND in scene!</color>");
+                return;
+            }
+
+            Debug.Log($"<color=#FFFF00>[GunDiagnostics] Gun: {gun.gameObject.name}, activeInHierarchy: {gun.gameObject.activeInHierarchy}, parent: {gun.transform.parent?.name}, localPos: {gun.transform.localPosition}, localRot: {gun.transform.localRotation.eulerAngles}, localScale: {gun.transform.localScale}, worldPos: {gun.transform.position}</color>");
+
+            Renderer[] renderers = gun.GetComponentsInChildren<Renderer>(true);
+            Debug.Log($"<color=#FFFF00>[GunDiagnostics] Found {renderers.Length} renderers under gun.</color>");
+            foreach (var r in renderers)
+            {
+                Vector3 vp = cam != null ? cam.WorldToViewportPoint(r.bounds.center) : Vector3.zero;
+                Debug.Log($"<color=#FFFF00>[GunDiagnostics] Renderer '{r.gameObject.name}' (active: {r.gameObject.activeInHierarchy}, enabled: {r.enabled}): layer={r.gameObject.layer}, localPos={r.transform.localPosition}, localScale={r.transform.localScale}, worldBounds={r.bounds}, viewportPos={vp}, matCount={r.sharedMaterials.Length}</color>");
+                for (int m = 0; m < r.sharedMaterials.Length; m++)
+                {
+                    Material mat = r.sharedMaterials[m];
+                    Debug.Log($"<color=#FFFF00>[GunDiagnostics]   Mat[{m}]: '{mat?.name}', shader='{mat?.shader?.name}'</color>");
+                }
             }
         }
 
@@ -146,17 +201,68 @@ namespace Recorded.Testing
 
             // Check if gun is already assembled under this camera
             Transform existingGun = cam.transform.Find("SpectrumGun");
-            if (existingGun != null) return;
+            if (existingGun != null)
+            {
+                RaycastWeapon rw = existingGun.GetComponent<RaycastWeapon>();
+                if (rw != null && rw.PlayerCamera == null) rw.SetCamera(cam);
+
+                Transform oldMockup = existingGun.Find("WeaponMockup");
+                Transform revModel = existingGun.Find("RevolverModel");
+                MeshRenderer[] renderers = existingGun.GetComponentsInChildren<MeshRenderer>(true);
+                if (oldMockup != null || revModel == null || renderers.Length == 0 || revModel.localScale.x < 1.0f)
+                {
+                    RevolverWeaponBuilder.BuildRevolver(existingGun, out Transform muzzlePoint, out Light muzzleLight);
+                    if (rw != null) rw.SetMuzzlePoint(muzzlePoint);
+                    WeaponImpactFeedback fb = existingGun.GetComponent<WeaponImpactFeedback>();
+                    if (fb != null) fb.SetMuzzleLight(muzzleLight);
+                }
+                else
+                {
+                    // Enforce rotation facing forward away from player
+                    if (revModel.localRotation.eulerAngles.y < 200f || revModel.localRotation.eulerAngles.y > 300f)
+                    {
+                        revModel.localRotation = Quaternion.Euler(0f, -90f, 0f);
+                    }
+                    Transform mp = existingGun.Find("MuzzlePoint");
+                    if (mp != null) mp.localPosition = new Vector3(0f, 0.01f, 0.09f);
+                    Transform cg = existingGun.Find("ChamberGlow");
+                    if (cg != null) cg.localPosition = new Vector3(0f, 0.035f, -0.02f);
+                }
+                existingGun.localPosition = new Vector3(0.20f, -0.16f, 0.50f);
+                return;
+            }
 
             // Check if gun exists elsewhere in the scene and reparent it to player camera
             SpectrumGunController existingController = FindFirstObjectByType<SpectrumGunController>();
             if (existingController != null)
             {
                 existingController.transform.SetParent(cam.transform, false);
-                existingController.transform.localPosition = new Vector3(0.24f, -0.22f, 0.45f);
+                existingController.transform.localPosition = new Vector3(0.20f, -0.16f, 0.50f);
                 existingController.transform.localRotation = Quaternion.identity;
                 RaycastWeapon existingRaycast = existingController.GetComponent<RaycastWeapon>();
                 if (existingRaycast != null) existingRaycast.SetCamera(cam);
+
+                Transform oldMockup = existingController.transform.Find("WeaponMockup");
+                Transform revModel = existingController.transform.Find("RevolverModel");
+                MeshRenderer[] renderers = existingController.GetComponentsInChildren<MeshRenderer>(true);
+                if (oldMockup != null || revModel == null || renderers.Length == 0 || revModel.localScale.x < 1.0f)
+                {
+                    RevolverWeaponBuilder.BuildRevolver(existingController.transform, out Transform muzzlePoint, out Light muzzleLight);
+                    if (existingRaycast != null) existingRaycast.SetMuzzlePoint(muzzlePoint);
+                    WeaponImpactFeedback fb = existingController.GetComponent<WeaponImpactFeedback>();
+                    if (fb != null) fb.SetMuzzleLight(muzzleLight);
+                }
+                else
+                {
+                    if (revModel.localRotation.eulerAngles.y < 200f || revModel.localRotation.eulerAngles.y > 300f)
+                    {
+                        revModel.localRotation = Quaternion.Euler(0f, -90f, 0f);
+                    }
+                    Transform mp = existingController.transform.Find("MuzzlePoint");
+                    if (mp != null) mp.localPosition = new Vector3(0f, 0.01f, 0.09f);
+                    Transform cg = existingController.transform.Find("ChamberGlow");
+                    if (cg != null) cg.localPosition = new Vector3(0f, 0.035f, -0.02f);
+                }
                 return;
             }
 
@@ -164,7 +270,7 @@ namespace Recorded.Testing
             GameObject gunRoot = new GameObject("SpectrumGun");
             gunRoot.transform.SetParent(cam.transform, false);
             // First-person viewmodel offset (slightly lower and to the right)
-            gunRoot.transform.localPosition = new Vector3(0.24f, -0.22f, 0.45f);
+            gunRoot.transform.localPosition = new Vector3(0.20f, -0.16f, 0.50f);
             gunRoot.transform.localRotation = Quaternion.identity;
 
             // Weapon Components
@@ -175,12 +281,11 @@ namespace Recorded.Testing
 
             SpectrumGunController controller = gunRoot.AddComponent<SpectrumGunController>();
 
-            // Build Mockup Model
-            SpectrumGunMockupBuilder.BuildMockup(gunRoot.transform, out Transform muzzlePoint, out Light muzzleLight, out Renderer rgbCoreRenderer);
+            // Build Revolver Model with friend's textures (Red, Green, Cyan)
+            RevolverWeaponBuilder.BuildRevolver(gunRoot.transform, out Transform newMuzzlePoint, out Light newMuzzleLight);
 
-            raycastWeapon.SetMuzzlePoint(muzzlePoint);
-            feedback.SetMuzzleLight(muzzleLight);
-            controller.SetCoreRenderer(rgbCoreRenderer);
+            raycastWeapon.SetMuzzlePoint(newMuzzlePoint);
+            feedback.SetMuzzleLight(newMuzzleLight);
 
             // Crosshair UI
             if (FindFirstObjectByType<CrosshairUI>() == null)
@@ -253,13 +358,19 @@ namespace Recorded.Testing
 
         private void SetupCylinderAmmoHUD()
         {
-            if (FindFirstObjectByType<Weapons.Ammo.CylinderAmmoHUD>() != null) return;
+            var existingHud = FindFirstObjectByType<Weapons.Ammo.CylinderAmmoHUD>();
+            if (existingHud != null)
+            {
+                existingHud.BuildHUDHierarchy();
+                return;
+            }
 
             GameObject hudManagerObj = new GameObject("CylinderAmmoHUD_System");
             hudManagerObj.AddComponent<Weapons.Ammo.CylinderAmmoController>();
             hudManagerObj.AddComponent<Weapons.Ammo.CylinderRotationController>();
-            hudManagerObj.AddComponent<Weapons.Ammo.CylinderAmmoHUD>();
+            var hud = hudManagerObj.AddComponent<Weapons.Ammo.CylinderAmmoHUD>();
             hudManagerObj.AddComponent<Weapons.Ammo.AmmoTestInput>();
+            hud.BuildHUDHierarchy();
         }
     }
 }

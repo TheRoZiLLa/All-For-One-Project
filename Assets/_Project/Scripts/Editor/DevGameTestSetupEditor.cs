@@ -19,6 +19,7 @@ namespace Recorded.EditorTools
 
         private static void AutoSetupIfDevGameTestActive()
         {
+            if (EditorApplication.isPlayingOrWillChangePlaymode) return;
             Scene activeScene = SceneManager.GetActiveScene();
             if (activeScene.path == ScenePath)
             {
@@ -40,6 +41,7 @@ namespace Recorded.EditorTools
 
         public static void SetupScene(bool showDialogIfOtherScene = true)
         {
+            if (EditorApplication.isPlayingOrWillChangePlaymode) return;
             // Ensure folder exists
             if (!AssetDatabase.IsValidFolder("Assets/_Project"))
             {
@@ -117,6 +119,7 @@ namespace Recorded.EditorTools
 
             // 3. Run full environment & gun setup
             bootstrap.SetupTestEnvironment();
+            RevolverSetupUtility.SetupRevolverInActiveScene();
 
             // 4. Update target materials in Edit Mode so they appear Neutral Grey immediately
             GameObject targetsGroup = GameObject.Find("TestTargets_Group");
@@ -155,8 +158,14 @@ namespace Recorded.EditorTools
             {
                 DevGameTestSetupEditor.SetupScene(true);
             }
+            GUI.backgroundColor = new Color(0.2f, 0.7f, 1f);
+            if (GUILayout.Button("🔫 Rebuild Sci-Fi Revolver Viewmodel", GUILayout.Height(34)))
+            {
+                RevolverSetupUtility.CreateOrUpdateRevolverPrefab();
+                RevolverSetupUtility.SetupRevolverInActiveScene(true);
+            }
             GUI.backgroundColor = Color.white;
-            EditorGUILayout.HelpBox("Click the button above to place Player.prefab into this scene, or select RECORDED > Spawn Player in Scene (Dev GameTest) from the top menu.", MessageType.Info);
+            EditorGUILayout.HelpBox("Click the button above to place Player.prefab into this scene, or rebuild the Sci-Fi Revolver model with unpacked meshes.", MessageType.Info);
         }
     }
 }

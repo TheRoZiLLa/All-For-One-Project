@@ -32,6 +32,7 @@ namespace Recorded.Weapons
         public event Action<Vector3, Vector3> OnTargetMiss; // origin, direction
 
         public Transform MuzzlePoint => muzzlePoint;
+        public Camera PlayerCamera => playerCamera;
         public float MaxRange { get => maxRange; set => maxRange = value; }
         public LayerMask HitLayers { get => hitLayers; set => hitLayers = value; }
 

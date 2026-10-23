@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using UnityEngine;
 
 namespace Recorded.ColorSystem
@@ -8,9 +8,8 @@ namespace Recorded.ColorSystem
     /// Manages an additive RGB state flag (None, Red, Green, Blue, Yellow, Magenta, Cyan, White),
     /// independent 5-second expiration timers per primary color,
     /// duplicate-hit protection (hitting an already active color does not reset or extend its timer),
-    /// and visual representation via MaterialPropertyBlock (_BaseColor / _Color).
+    /// and visual representation via MaterialPropertyBlock (_BaseColor / _Color) across single or multiple renderers.
     /// </summary>
-    [RequireComponent(typeof(Renderer))]
     public class RGBColorTarget : MonoBehaviour, IColorReceivable
     {
         public const float ColorDuration = 5.0f;
@@ -18,6 +17,10 @@ namespace Recorded.ColorSystem
         [Header("State")]
         [Tooltip("Active color combination flags.")]
         [SerializeField] private ObjectColorState currentState = ObjectColorState.None;
+
+        [Header("Renderer Configuration")]
+        [Tooltip("If true, applies color state to all child Renderers as well as the root Renderer.")]
+        [SerializeField] private bool includeChildRenderers = true;
 
         [Header("Color Palette Configuration")]
         public static readonly Color ColorNeutralGrey = new Color(0.5f, 0.5f, 0.5f, 1f);     // #7F7F7F
@@ -35,6 +38,7 @@ namespace Recorded.ColorSystem
         private float _expireBlue = -1f;
 
         private Renderer _renderer;
+        private Renderer[] _renderers;
         private MaterialPropertyBlock _propBlock;
         private static readonly int BaseColorPropId = Shader.PropertyToID("_BaseColor");
         private static readonly int ColorPropId = Shader.PropertyToID("_Color");
@@ -44,7 +48,7 @@ namespace Recorded.ColorSystem
 
         private void Awake()
         {
-            _renderer = GetComponent<Renderer>();
+            CacheRenderers();
             _propBlock = new MaterialPropertyBlock();
         }
 
@@ -52,6 +56,23 @@ namespace Recorded.ColorSystem
         {
             // Target starts in None state and appears Neutral Grey
             UpdateVisuals();
+        }
+
+        public void CacheRenderers()
+        {
+            _renderer = GetComponent<Renderer>();
+            if (includeChildRenderers)
+            {
+                _renderers = GetComponentsInChildren<Renderer>(true);
+            }
+            else if (_renderer != null)
+            {
+                _renderers = new Renderer[] { _renderer };
+            }
+            else
+            {
+                _renderers = Array.Empty<Renderer>();
+            }
         }
 
         private void Update()
@@ -188,17 +209,17 @@ namespace Recorded.ColorSystem
         }
 
         /// <summary>
-        /// Recalculates and applies the visual color via MaterialPropertyBlock.
+        /// Recalculates and applies the visual color via MaterialPropertyBlock across all target renderers.
         /// Compatible with URP Lit and avoids instantiating new materials.
         /// </summary>
         public void UpdateVisuals()
         {
-            if (_renderer == null)
+            if (_renderers == null || _renderers.Length == 0)
             {
-                _renderer = GetComponent<Renderer>();
+                CacheRenderers();
             }
 
-            if (_renderer == null) return;
+            if (_renderers == null || _renderers.Length == 0) return;
 
             if (_propBlock == null)
             {
@@ -207,10 +228,24 @@ namespace Recorded.ColorSystem
 
             Color displayColor = GetColorForState(currentState);
 
-            _renderer.GetPropertyBlock(_propBlock);
-            _propBlock.SetColor(BaseColorPropId, displayColor);
-            _propBlock.SetColor(ColorPropId, displayColor);
-            _renderer.SetPropertyBlock(_propBlock);
+            for (int i = 0; i < _renderers.Length; i++)
+            {
+                Renderer r = _renderers[i];
+                if (r == null) continue;
+
+                r.GetPropertyBlock(_propBlock);
+                _propBlock.SetColor(BaseColorPropId, displayColor);
+                _propBlock.SetColor(ColorPropId, displayColor);
+                r.SetPropertyBlock(_propBlock);
+            }
+        }
+
+        /// <summary>
+        /// Checks whether allspecified color flags are currently active on this target.
+        /// </summary>
+        public bool HasColor(ObjectColorState requiredFlags)
+        {
+            return (currentState & requiredFlags) == requiredFlags;
         }
 
         /// <summary>
@@ -279,7 +314,7 @@ namespace Recorded.ColorSystem
 #if UNITY_EDITOR
         private void OnValidate()
         {
-            if (_renderer == null) _renderer = GetComponent<Renderer>();
+            CacheRenderers();
             if (_propBlock == null) _propBlock = new MaterialPropertyBlock();
             UpdateVisuals();
         }

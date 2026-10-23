@@ -7,7 +7,7 @@ namespace Recorded.Weapons.Ammo
     /// <summary>
     /// Controls the physical rotation angle and animation of the inner cylinder.
     /// Manages Q/E and Mouse Scroll manual rotation and automatic advancement after firing.
-    /// Synchronizes rotation angle with the active chamber index at the fixed 12 o'clock position.
+    /// Synchronizes rotation angle with the active chamber index at the fixed 6 o'clock firing position.
     /// </summary>
     public class CylinderRotationController : MonoBehaviour
     {
@@ -45,7 +45,7 @@ namespace Recorded.Weapons.Ammo
 
         private void Start()
         {
-            // Sync initial visual orientation (Chamber activeIndex aligned at 12 o'clock)
+            // Sync initial visual orientation (Chamber activeIndex aligned at 6 o'clock)
             int activeIndex = ammoController != null ? ammoController.ActiveChamberIndex : 0;
             _currentAngle = activeIndex * ChamberAngleStep;
             _targetAngle = _currentAngle;
@@ -53,21 +53,23 @@ namespace Recorded.Weapons.Ammo
         }
 
         /// <summary>
-        /// Rotate cylinder to previous chamber (Q key / Scroll Up).
+        /// Rotate cylinder so the bottom (6 o'clock) chamber moves to the left according to player's rear view (Q key / Scroll Up).
+        /// Brings the right-hand chamber (4 o'clock, +1 index) into the 6 o'clock firing indicator.
         /// </summary>
         public void RotateLeft()
         {
             if (_isRotating) return;
-            RotateChamberStep(-1); // Previous index
+            RotateChamberStep(1);
         }
 
         /// <summary>
-        /// Rotate cylinder to next chamber (E key / Scroll Down).
+        /// Rotate cylinder so the bottom (6 o'clock) chamber moves to the right according to player's rear view (E key / Scroll Down).
+        /// Brings the left-hand chamber (8 o'clock, -1 index) into the 6 o'clock firing indicator.
         /// </summary>
         public void RotateRight()
         {
             if (_isRotating) return;
-            RotateChamberStep(1); // Next index
+            RotateChamberStep(-1);
         }
 
         /// <summary>
