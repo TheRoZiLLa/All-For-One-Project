@@ -48,12 +48,8 @@ namespace Recorded.ColorSystem
         [SerializeField] private bool enableCyanStasis = true;
         [SerializeField] private float cyanStasisDuration = 5.0f;
 
-        [Header("COMBO SYNERGIES (Yellow / Magenta / White)")]
+        [Header("COMBO SYNERGIES (Yellow tether boost)")]
         [SerializeField] private float yellowSlingshotTensionMultiplier = 1.5f;
-        [SerializeField] private float whiteVortexPullRadius = 6.0f;
-        [SerializeField] private float whiteVortexPullForce = 9.0f;
-        [SerializeField] private float whiteSupernovaRadius = 6.5f;
-        [SerializeField] private float whiteSupernovaForce = 24.0f;
 
         private IColorReceivable _colorTarget;
         private Rigidbody _rb;
@@ -71,6 +67,7 @@ namespace Recorded.ColorSystem
 
         // RED state
         private Vector3 _lastRedImpulseApplied;
+        private Vector3 _lastRedShotDirection;
         private int _redImpulseHitCount;
         private float _redChainTimer;
         private TrailRenderer _kineticTrail;
@@ -81,6 +78,7 @@ namespace Recorded.ColorSystem
         private float _greenBindTimer;
         private bool _greenFromColorFlag;
         private GreenEnergyTether _tether;
+        private Vector3 _storedGreenAnchorWorld;
 
         // CYAN stasis. The snapshot is the motion to restore when the freeze ends. Mixes do not consume it here.
         private bool _isBlueStasis;
@@ -93,9 +91,6 @@ namespace Recorded.ColorSystem
         private LineRenderer _chronoRingYZ;
         private LineRenderer _chronoVectorArrowLine;
         private Light _chronoPointLight;
-
-        // WHITE Prismatic Overdrive state
-        private bool _wasWhiteOverdrive;
 
         private static Shader _cachedUnlitShader;
 
@@ -112,6 +107,8 @@ namespace Recorded.ColorSystem
         public Vector3 GreenBindAnchorPoint => _tether != null && _tether.PullAnchor != null ? _tether.PullAnchor.TetherPoint : TetherPoint;
         public Rigidbody ConnectedPartnerBody => _tether != null && _tether.Other(this) != null ? _tether.Other(this).Body : null;
         public Vector3 LastRedImpulseApplied => _lastRedImpulseApplied;
+        public Vector3 LastRedShotDirection => _lastRedShotDirection;
+        public Vector3 StoredGreenAnchorWorld => _storedGreenAnchorWorld;
         public int RedImpulseHitCount => _redImpulseHitCount;
         public Vector3 StoredStasisVelocity => _stasisLinearSnapshot;
         public Vector3 StoredStasisImpulse => _stasisLinearSnapshot;
@@ -234,12 +231,18 @@ namespace Recorded.ColorSystem
                 {
                     ActivateGreenBind(greenBindDuration > 0f ? greenBindDuration : 5.0f, false);
                 }
+
+                _storedGreenAnchorWorld = _tether != null ? GreenBindAnchorPoint : hitPoint;
             }
 
             // 3. BLUE — complete time stop. A duplicate hit does not take a new snapshot.
             if (enableCyanStasis && (firedAmmo == AmmoType.Cyan || (mappedColorFlag & ObjectColorState.Blue) != 0))
             {
-                ActivateCyanStasis(cyanStasisDuration > 0f ? cyanStasisDuration : 5.0f, false);
+                bool alreadyGreen = _colorTarget != null && (_colorTarget.CurrentColorState & ObjectColorState.Green) != 0;
+                if (!alreadyGreen)
+                {
+                    ActivateCyanStasis(cyanStasisDuration > 0f ? cyanStasisDuration : 5.0f, false);
+                }
             }
         }
 
@@ -250,12 +253,13 @@ namespace Recorded.ColorSystem
             Vector3 impulse = ((pushDir * redImpulseForce) + (Vector3.up * redUpwardLift)) * synergyMult;
 
             _lastRedImpulseApplied = impulse;
+            _lastRedShotDirection = pushDir;
             _redImpulseHitCount++;
             _redChainTimer = redChainImpactWindow;
 
-            // A frozen body does not accept this impulse. Banking it for a later mix is out of scope.
             if (_isBlueStasis)
             {
+                BankImpulseIntoStasisSnapshot(impulse);
                 UpdateChronoFieldVisuals();
             }
             else if (_rb != null && !_rb.isKinematic)
@@ -413,12 +417,12 @@ namespace Recorded.ColorSystem
             OnStasisStateChanged?.Invoke(true);
         }
 
-        public void DeactivateCyanStasis()
+        public void DeactivateCyanStasis(bool restoreSnapshotVelocity = true)
         {
             if (!_isBlueStasis) return;
 
-            Vector3 linear = _stasisLinearSnapshot;
-            Vector3 angular = _stasisAngularSnapshot;
+            Vector3 linear = restoreSnapshotVelocity ? _stasisLinearSnapshot : Vector3.zero;
+            Vector3 angular = restoreSnapshotVelocity ? _stasisAngularSnapshot : Vector3.zero;
 
             _isBlueStasis = false;
             _blueStasisTimer = 0f;
@@ -429,7 +433,6 @@ namespace Recorded.ColorSystem
             SetChronoFieldActive(false);
             ApplyStatePhysicsModifiers();
 
-            // Time resumes. Restore the motion captured at the freeze. Do not launch.
             if (_rb != null && !_rb.isKinematic)
             {
                 _rb.linearVelocity = linear;
@@ -437,6 +440,29 @@ namespace Recorded.ColorSystem
             }
 
             OnStasisStateChanged?.Invoke(false);
+        }
+
+        /// <summary>
+        /// Adds impulse energy into the stasis snapshot (Magenta charge while frozen).
+        /// </summary>
+        public void BankImpulseIntoStasisSnapshot(Vector3 impulse)
+        {
+            if (_rb == null)
+            {
+                _stasisLinearSnapshot += impulse;
+                return;
+            }
+
+            float mass = Mathf.Max(0.001f, _rb.mass);
+            _stasisLinearSnapshot += impulse / mass;
+        }
+
+        public void ClearStoredReactionData()
+        {
+            _stasisLinearSnapshot = Vector3.zero;
+            _stasisAngularSnapshot = Vector3.zero;
+            _lastRedShotDirection = Vector3.zero;
+            _storedGreenAnchorWorld = Vector3.zero;
         }
 
         private Vector3 GetTetherPoint()
@@ -517,40 +543,25 @@ namespace Recorded.ColorSystem
 
             bool greenFlag = enableGreenBind && (newState & ObjectColorState.Green) != 0;
             bool blueFlag = enableCyanStasis && (newState & ObjectColorState.Blue) != 0;
-            bool isWhite = (newState & (ObjectColorState.Red | ObjectColorState.Green | ObjectColorState.Blue)) ==
-                           (ObjectColorState.Red | ObjectColorState.Green | ObjectColorState.Blue);
-
-            // WHITE Prismatic Supernova Burst when White overdrive state ends or triggers
-            if (isWhite && !_wasWhiteOverdrive)
-            {
-                _wasWhiteOverdrive = true;
-                if (Application.isPlaying)
-                {
-                    SpawnRedShockwaveVFX(transform.position, Vector3.up, Vector3.up);
-                    ActivateKineticTrail(Color.white, 0.8f);
-                }
-            }
-            else if (!isWhite && _wasWhiteOverdrive)
-            {
-                _wasWhiteOverdrive = false;
-                ApplyRadialShockwave(transform.position, whiteSupernovaRadius, whiteSupernovaForce, 1.5f, _rb);
-                if (Application.isPlaying)
-                {
-                    SpawnRedShockwaveVFX(transform.position, Vector3.up, Vector3.up);
-                }
-            }
+            // Cyan reaction is frictionless zero-g, not a freeze. Do not enter stasis for Green|Blue.
+            bool cyanReaction = greenFlag && blueFlag;
 
             // Support direct ApplyColor() calls (e.g., from puzzle scripts or unit tests)
             if (greenFlag && !_isGreenBound)
             {
                 ActivateGreenBind(greenBindDuration > 0f ? greenBindDuration : 5.0f, true);
+                _storedGreenAnchorWorld = GreenBindAnchorPoint;
             }
             else if (!greenFlag && _isGreenBound && _greenFromColorFlag)
             {
                 DeactivateGreenBind();
             }
 
-            if (blueFlag && !_isBlueStasis)
+            if (cyanReaction && _isBlueStasis)
+            {
+                DeactivateCyanStasis(restoreSnapshotVelocity: true);
+            }
+            else if (blueFlag && !_isBlueStasis && !cyanReaction)
             {
                 ActivateCyanStasis(cyanStasisDuration > 0f ? cyanStasisDuration : 5.0f, true);
             }
@@ -615,29 +626,6 @@ namespace Recorded.ColorSystem
                     else
                     {
                         DeactivateCyanStasis();
-                    }
-                }
-            }
-        }
-
-        private void FixedUpdate()
-        {
-            if (_rb == null || _rb.isKinematic) return;
-
-            // WHITE Prismatic Overdrive Vortex Pull: draw nearby objects inward before Supernova burst
-            if (_wasWhiteOverdrive)
-            {
-                Collider[] nearby = Physics.OverlapSphere(transform.position, whiteVortexPullRadius);
-                for (int i = 0; i < nearby.Length; i++)
-                {
-                    Rigidbody otherRb = nearby[i].attachedRigidbody;
-                    if (otherRb == null || otherRb == _rb || otherRb.isKinematic) continue;
-                    if (otherRb.CompareTag("Player") || otherRb.GetComponent("PlayerMovement") != null) continue;
-
-                    Vector3 pull = (_rb.worldCenterOfMass - otherRb.worldCenterOfMass);
-                    if (pull.sqrMagnitude > 0.25f)
-                    {
-                        otherRb.AddForce(pull.normalized * whiteVortexPullForce, ForceMode.Acceleration);
                     }
                 }
             }
