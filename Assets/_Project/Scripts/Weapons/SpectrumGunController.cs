@@ -1,0 +1,728 @@
+﻿using UnityEngine;
+using UnityEngine.InputSystem;
+using Recorded.ColorSystem;
+
+namespace Recorded.Weapons
+{
+    public enum SpectrumColorMode
+    {
+        Red,    // Impulse
+        Green,  // Bind
+        Blue    // Stasis (Cyan)
+    }
+
+    /// <summary>
+    /// Master controller for the RECORDED Spectrum Gun.
+    /// Manages fire rate, input handling, 6-chamber cylinder integration, first-person viewmodel
+    /// ergonomics/recoil animation, and real-time color synchronization across Weapon Core, Crosshair, and VFX.
+    /// </summary>
+    public class SpectrumGunController : MonoBehaviour
+    {
+        [Header("Components")]
+        [SerializeField] private RaycastWeapon raycastWeapon;
+        [SerializeField] private WeaponImpactFeedback impactFeedback;
+        [SerializeField] private Renderer rgbCoreRenderer;
+        [SerializeField] private Light chamberGlowLight;
+        [SerializeField] private UI.CrosshairUI crosshairUI;
+
+        [Header("Ammunition System Integration")]
+        [SerializeField] private Ammo.CylinderAmmoController ammoController;
+        [SerializeField] private Ammo.CylinderRotationController rotationController;
+
+        [Header("Fire Settings")]
+        [Tooltip("Rounds per second.")]
+        [SerializeField] private float fireRate = 5f;
+
+        [Tooltip("If true, gun fires continuously while holding fire button. If false, semi-auto.")]
+        [SerializeField] private bool isAutomatic = false;
+
+        [Header("First-Person Recoil & Sway Polish")]
+        [SerializeField] private float recoilKickbackZ = 0.028f;
+        [SerializeField] private float recoilKickUpPitch = 6.5f;
+        [SerializeField] private float recoilRecoverySpeed = 14f;
+
+        [Header("Input Configuration")]
+        [Tooltip("Optional Input Action Reference for Attack. If not set, reads default mouse left-click.")]
+        [SerializeField] private InputActionReference attackAction;
+
+        [Header("RGB Spectrum Mode (Fallback)")]
+        [SerializeField] private SpectrumColorMode currentMode = SpectrumColorMode.Red;
+
+        // Color definitions for RGB Spectrum
+        public static readonly Color ColorRed = new Color(1f, 0.18f, 0.18f, 1f);    // Impulse Red
+        public static readonly Color ColorGreen = new Color(0.2f, 1f, 0.35f, 1f);   // Bind Green
+        public static readonly Color ColorBlue = new Color(0.18f, 0.88f, 1f, 1f);  // Stasis Cyan / Light Blue
+
+        private float _nextFireTime;
+        private InputAction _resolvedAttackAction;
+        private Transform _revolverModelTransform;
+        private Vector3 _modelBaseLocalPos = Vector3.zero;
+        private Quaternion _modelBaseLocalRot = Quaternion.Euler(0f, -90f, 0f);
+        private float _currentRecoil;
+
+        public SpectrumColorMode CurrentMode => currentMode;
+        public float FireRate { get => fireRate; set => fireRate = Mathf.Max(0.1f, value); }
+        public bool IsAutomatic { get => isAutomatic; set => isAutomatic = value; }
+
+        private void Awake()
+        {
+            ResolveDependencies();
+        }
+
+        private void Start()
+        {
+            ResolveDependencies();
+            EnsureViewmodelAndMuzzleAlignment();
+
+            if (ammoController != null)
+            {
+                SyncWithActiveChamber();
+            }
+            else
+            {
+                ApplyColorMode(currentMode);
+            }
+        }
+
+        public void ResolveDependencies()
+        {
+            if (raycastWeapon == null)
+            {
+                raycastWeapon = GetComponent<RaycastWeapon>();
+            }
+
+            if (impactFeedback == null)
+            {
+                impactFeedback = GetComponent<WeaponImpactFeedback>();
+            }
+
+            if (ammoController == null)
+            {
+                ammoController = FindFirstObjectByType<Ammo.CylinderAmmoController>();
+            }
+
+            if (rotationController == null)
+            {
+                rotationController = FindFirstObjectByType<Ammo.CylinderRotationController>();
+            }
+
+            if (_revolverModelTransform == null)
+            {
+                _revolverModelTransform = transform.Find("RevolverModel");
+                if (_revolverModelTransform != null)
+                {
+                    _modelBaseLocalPos = _revolverModelTransform.localPosition;
+                    _modelBaseLocalRot = _revolverModelTransform.localRotation;
+                }
+            }
+
+            ResolveCoreRenderer();
+        }
+
+        private void EnsureViewmodelAndMuzzleAlignment()
+        {
+            // Ensure first-person viewmodel sits naturally close to the player's right hand rather than floating far away
+            if (transform.parent != null && transform.parent.GetComponent<Camera>() != null)
+            {
+                if (transform.localPosition.z > 0.34f)
+                {
+                    transform.localPosition = RevolverWeaponBuilder.DefaultViewmodelLocalPosition;
+                    transform.localRotation = Quaternion.Euler(RevolverWeaponBuilder.DefaultViewmodelLocalEuler);
+                }
+            }
+
+            // Ensure MuzzlePoint is aligned with the upper barrel tip
+            Transform mp = transform.Find("MuzzlePoint");
+            if (mp != null)
+            {
+                MeshRenderer barrelRend = null;
+                if (_revolverModelTransform != null)
+                {
+                    foreach (var r in _revolverModelTransform.GetComponentsInChildren<MeshRenderer>(true))
+                    {
+                        if (r.gameObject.name.ToLower().Contains("barrel"))
+                        {
+                            barrelRend = r;
+                            break;
+                        }
+                    }
+                }
+                mp.localPosition = RevolverWeaponBuilder.CalculateBarrelTipLocalPosition(transform, barrelRend);
+
+                if (raycastWeapon != null)
+                {
+                    raycastWeapon.SetMuzzlePoint(mp);
+                }
+
+                if (impactFeedback != null)
+                {
+                    Light ml = mp.GetComponent<Light>();
+                    if (ml != null) impactFeedback.SetMuzzleLight(ml);
+                }
+            }
+        }
+
+        private void OnEnable()
+        {
+            ResolveDependencies();
+
+            if (attackAction != null && attackAction.action != null)
+            {
+                _resolvedAttackAction = attackAction.action;
+                _resolvedAttackAction.Enable();
+            }
+
+            if (ammoController != null)
+            {
+                ammoController.OnActiveChamberChanged -= HandleActiveChamberChanged;
+                ammoController.OnChamberStateChanged -= HandleChamberStateChanged;
+                ammoController.OnCylinderReloaded -= HandleCylinderReloaded;
+
+                ammoController.OnActiveChamberChanged += HandleActiveChamberChanged;
+                ammoController.OnChamberStateChanged += HandleChamberStateChanged;
+                ammoController.OnCylinderReloaded += HandleCylinderReloaded;
+            }
+        }
+
+        private void OnDisable()
+        {
+            if (_resolvedAttackAction != null)
+            {
+                _resolvedAttackAction.Disable();
+            }
+
+            if (ammoController != null)
+            {
+                ammoController.OnActiveChamberChanged -= HandleActiveChamberChanged;
+                ammoController.OnChamberStateChanged -= HandleChamberStateChanged;
+                ammoController.OnCylinderReloaded -= HandleCylinderReloaded;
+            }
+        }
+
+        private void Update()
+        {
+            UpdateRecoilAnimation();
+            CheckColorSwitchInput();
+
+            if (CheckFireInput())
+            {
+                AttemptFire();
+            }
+        }
+
+        private void UpdateRecoilAnimation()
+        {
+            if (_revolverModelTransform == null) return;
+
+            if (_currentRecoil > 0.0001f)
+            {
+                _currentRecoil = Mathf.MoveTowards(_currentRecoil, 0f, Time.deltaTime * recoilRecoverySpeed);
+                Vector3 recoilOffset = new Vector3(0f, _currentRecoil * 0.008f, -_currentRecoil * recoilKickbackZ);
+                // Because RevolverModel has localRotation Y=-90, local +Z of gunRoot corresponds to model recoil pitch around Z
+                Quaternion pitchRot = Quaternion.Euler(0f, 0f, -_currentRecoil * recoilKickUpPitch);
+                _revolverModelTransform.localPosition = _modelBaseLocalPos + recoilOffset;
+                _revolverModelTransform.localRotation = _modelBaseLocalRot * pitchRot;
+            }
+            else
+            {
+                _revolverModelTransform.localPosition = _modelBaseLocalPos;
+                _revolverModelTransform.localRotation = _modelBaseLocalRot;
+            }
+        }
+
+        private void TriggerRecoilImpulse(float strength = 1.0f)
+        {
+            _currentRecoil = Mathf.Clamp01(_currentRecoil + strength);
+        }
+
+        private void CheckColorSwitchInput()
+        {
+            if (rotationController == null)
+            {
+                rotationController = FindFirstObjectByType<Ammo.CylinderRotationController>();
+            }
+
+            // If cylinder ammo system is present, mouse scroll wheel and Q/E rotate the cylinder!
+            if (rotationController != null)
+            {
+                // 1. Mouse Scroll Wheel
+                if (Mouse.current != null)
+                {
+                    float scroll = Mouse.current.scroll.ReadValue().y;
+                    if (scroll > 0.1f)
+                    {
+                        rotationController.RotateLeft(); // Scroll UP -> Previous/Left chamber
+                        return;
+                    }
+                    else if (scroll < -0.1f)
+                    {
+                        rotationController.RotateRight(); // Scroll DOWN -> Next/Right chamber
+                        return;
+                    }
+                }
+
+                // 2. Q / E manual rotation
+                if (Keyboard.current != null)
+                {
+                    if (Keyboard.current.qKey.wasPressedThisFrame)
+                    {
+                        rotationController.RotateLeft();
+                        return;
+                    }
+                    else if (Keyboard.current.eKey.wasPressedThisFrame)
+                    {
+                        rotationController.RotateRight();
+                        return;
+                    }
+                }
+            }
+            else if (ammoController == null)
+            {
+                // Fallback for standalone prototype without cylinder HUD: Keys 1, 2, 3 and legacy scroll
+                if (Keyboard.current != null)
+                {
+                    if (Keyboard.current.digit1Key.wasPressedThisFrame || Keyboard.current.numpad1Key.wasPressedThisFrame)
+                    {
+                        SetColorMode(SpectrumColorMode.Red);
+                    }
+                    else if (Keyboard.current.digit2Key.wasPressedThisFrame || Keyboard.current.numpad2Key.wasPressedThisFrame)
+                    {
+                        SetColorMode(SpectrumColorMode.Green);
+                    }
+                    else if (Keyboard.current.digit3Key.wasPressedThisFrame || Keyboard.current.numpad3Key.wasPressedThisFrame)
+                    {
+                        SetColorMode(SpectrumColorMode.Blue);
+                    }
+                }
+
+                if (Mouse.current != null)
+                {
+                    float scroll = Mouse.current.scroll.ReadValue().y;
+                    if (scroll > 0.1f)
+                    {
+                        CycleColorMode(-1);
+                    }
+                    else if (scroll < -0.1f)
+                    {
+                        CycleColorMode(1);
+                    }
+                }
+            }
+
+            // Fallback Test reload (R key) only if AmmoTestInput is not active on the ammo controller
+            if (ammoController != null && Keyboard.current != null && Keyboard.current.rKey.wasPressedThisFrame)
+            {
+                var dedicatedTestInput = ammoController.GetComponent<Ammo.AmmoTestInput>();
+                if (dedicatedTestInput == null || !dedicatedTestInput.isActiveAndEnabled)
+                {
+                    ammoController.TestReloadRandom();
+                    Debug.Log("<color=#FFE84D><b>[Spectrum Gun]</b> Test Reload (R): Filled all 6 chambers with randomized RED, GREEN, CYAN distribution.</color>");
+                }
+            }
+        }
+
+        public void CycleColorMode(int direction)
+        {
+            int total = 3;
+            int next = ((int)currentMode + direction) % total;
+            if (next < 0) next += total;
+            SetColorMode((SpectrumColorMode)next);
+        }
+
+        private bool CheckFireInput()
+        {
+            if (_resolvedAttackAction != null)
+            {
+                return isAutomatic
+                    ? _resolvedAttackAction.IsPressed()
+                    : _resolvedAttackAction.WasPressedThisFrame();
+            }
+
+            if (Mouse.current != null)
+            {
+                return isAutomatic
+                    ? Mouse.current.leftButton.isPressed
+                    : Mouse.current.leftButton.wasPressedThisFrame;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Execute shot if cooldown has elapsed and cylinder has ammo at the 12 o'clock firing position.
+        /// Consumes the round, fires raycast from exact MuzzlePoint with matching color, and auto-advances the cylinder.
+        /// </summary>
+        public bool AttemptFire()
+        {
+            if (Time.time < _nextFireTime) return false;
+
+            ResolveDependencies();
+
+            if (rotationController != null && rotationController.IsRotating)
+            {
+                return false; // Prevent firing while cylinder is actively rotating
+            }
+
+            // Cylinder Ammo Logic
+            if (ammoController != null)
+            {
+                if (!ammoController.HasActiveRound)
+                {
+                    // Dry fire: Chamber at 12 o'clock is empty
+                    Debug.Log("<color=#888888><b>[Spectrum Gun]</b> *CLICK* (Dry Fire) - 12 o'clock chamber is EMPTY. No shot fired, cylinder does not advance.</color>");
+                    TriggerRecoilImpulse(0.22f);
+                    _nextFireTime = Time.time + 0.22f; // Short dry-fire debounce
+                    return false;
+                }
+
+                if (!ammoController.TryConsumeActiveRound(out Ammo.AmmoType firedAmmo))
+                {
+                    return false;
+                }
+
+                _nextFireTime = Time.time + (1f / fireRate);
+                TriggerRecoilImpulse(1.0f);
+
+                Color firedColor = GetAmmoColor(firedAmmo);
+                if (impactFeedback != null)
+                {
+                    impactFeedback.SetFeedbackColor(firedColor);
+                }
+
+                // Map fired ammo type to RGB object color state
+                ObjectColorState shotColorState = ObjectColorState.None;
+                switch (firedAmmo)
+                {
+                    case Ammo.AmmoType.Red:
+                        shotColorState = ObjectColorState.Red;
+                        break;
+                    case Ammo.AmmoType.Green:
+                        shotColorState = ObjectColorState.Green;
+                        break;
+                    case Ammo.AmmoType.Cyan:
+                        shotColorState = ObjectColorState.Blue; // Cyan ammo maps to primary Blue flag
+                        break;
+                }
+
+                if (raycastWeapon != null)
+                {
+                    Transform muzzle = raycastWeapon.MuzzlePoint;
+                    Vector3 muzzlePos = muzzle != null ? muzzle.position : transform.position;
+
+                    bool hit = raycastWeapon.FireRaycast(out RaycastHit hitInfo, out Vector3 targetPoint);
+
+                    if (hit)
+                    {
+                        Vector3 shotDir = (hitInfo.point - muzzlePos).sqrMagnitude > 0.0001f
+                            ? (hitInfo.point - muzzlePos).normalized
+                            : transform.forward;
+
+                        // 1. Trigger immediate shot impact skills (RED Impulse, GREEN Bind, CYAN Stasis)
+                        IColorShotImpact[] shotImpacts = hitInfo.collider.GetComponentsInParent<IColorShotImpact>();
+                        if (shotImpacts != null)
+                        {
+                            for (int i = 0; i < shotImpacts.Length; i++)
+                            {
+                                shotImpacts[i].OnColorShotHit(firedAmmo, shotColorState, hitInfo, shotDir);
+                            }
+                        }
+
+                        // 2. Apply persistent 5-second RGB color state to hit target
+                        if (shotColorState != ObjectColorState.None)
+                        {
+                            IColorReceivable target = hitInfo.collider.GetComponentInParent<IColorReceivable>();
+                            if (target != null)
+                            {
+                                target.ApplyColor(shotColorState);
+                            }
+                        }
+
+                        if (impactFeedback != null)
+                        {
+                            impactFeedback.PlayHitFeedback(muzzlePos, hitInfo);
+                        }
+                    }
+                    else
+                    {
+                        if (impactFeedback != null)
+                        {
+                            impactFeedback.PlayMissFeedback(muzzlePos, targetPoint);
+                        }
+                    }
+                }
+
+                Debug.Log($"<color=#{ColorUtility.ToHtmlStringRGB(firedColor)}><b>[Spectrum Gun]</b> Fired <b>{firedAmmo.ToString().ToUpper()}</b> round from active chamber! Auto-advancing cylinder...</color>");
+
+                // Automatically advance the cylinder to the next chamber following a successful shot
+                if (rotationController != null)
+                {
+                    rotationController.AutoAdvance();
+                }
+
+                return true;
+            }
+
+            // Fallback for standalone gun testing without cylinder
+            _nextFireTime = Time.time + (1f / fireRate);
+            TriggerRecoilImpulse(1.0f);
+
+            if (raycastWeapon == null) return false;
+
+            ObjectColorState fallbackState = ObjectColorState.None;
+            switch (currentMode)
+            {
+                case SpectrumColorMode.Red: fallbackState = ObjectColorState.Red; break;
+                case SpectrumColorMode.Green: fallbackState = ObjectColorState.Green; break;
+                case SpectrumColorMode.Blue: fallbackState = ObjectColorState.Blue; break;
+            }
+
+            Transform fallbackMuzzle = raycastWeapon.MuzzlePoint;
+            Vector3 fallbackMuzzlePos = fallbackMuzzle != null ? fallbackMuzzle.position : transform.position;
+
+            bool fallbackHit = raycastWeapon.FireRaycast(out RaycastHit fallbackHitInfo, out Vector3 fallbackTargetPoint);
+
+            if (fallbackHit)
+            {
+                Ammo.AmmoType fallbackAmmo = Ammo.AmmoType.Red;
+                if (currentMode == SpectrumColorMode.Green) fallbackAmmo = Ammo.AmmoType.Green;
+                else if (currentMode == SpectrumColorMode.Blue) fallbackAmmo = Ammo.AmmoType.Cyan;
+
+                Vector3 fallbackShotDir = (fallbackHitInfo.point - fallbackMuzzlePos).sqrMagnitude > 0.0001f
+                    ? (fallbackHitInfo.point - fallbackMuzzlePos).normalized
+                    : transform.forward;
+
+                IColorShotImpact[] shotImpacts = fallbackHitInfo.collider.GetComponentsInParent<IColorShotImpact>();
+                if (shotImpacts != null)
+                {
+                    for (int i = 0; i < shotImpacts.Length; i++)
+                    {
+                        shotImpacts[i].OnColorShotHit(fallbackAmmo, fallbackState, fallbackHitInfo, fallbackShotDir);
+                    }
+                }
+
+                if (fallbackState != ObjectColorState.None)
+                {
+                    IColorReceivable target = fallbackHitInfo.collider.GetComponentInParent<IColorReceivable>();
+                    if (target != null)
+                    {
+                        target.ApplyColor(fallbackState);
+                    }
+                }
+
+                if (impactFeedback != null)
+                {
+                    impactFeedback.PlayHitFeedback(fallbackMuzzlePos, fallbackHitInfo);
+                }
+            }
+            else
+            {
+                if (impactFeedback != null)
+                {
+                    impactFeedback.PlayMissFeedback(fallbackMuzzlePos, fallbackTargetPoint);
+                }
+            }
+
+            return true;
+        }
+
+        private void HandleActiveChamberChanged(int activeIndex)
+        {
+            SyncWithActiveChamber();
+        }
+
+        private void HandleChamberStateChanged(int chamberIndex, Ammo.AmmoType newAmmo)
+        {
+            if (ammoController != null && chamberIndex == ammoController.ActiveChamberIndex)
+            {
+                SyncWithActiveChamber();
+            }
+        }
+
+        private void HandleCylinderReloaded()
+        {
+            SyncWithActiveChamber();
+        }
+
+        /// <summary>
+        /// Synchronizes the 3D gun core visual, crosshair color, and impact feedback with the 12 o'clock chamber.
+        /// </summary>
+        public void SyncWithActiveChamber()
+        {
+            if (ammoController == null) return;
+
+            Ammo.AmmoType activeAmmo = ammoController.ActiveAmmoType;
+            Color activeColor = GetAmmoColor(activeAmmo);
+
+            // 1. Update RGB Core Chamber material & emission
+            ResolveCoreRenderer();
+            if (rgbCoreRenderer != null && rgbCoreRenderer.material != null)
+            {
+                if (activeAmmo == Ammo.AmmoType.Empty)
+                {
+                    rgbCoreRenderer.material.color = new Color(0.08f, 0.08f, 0.1f, 1f);
+                    if (rgbCoreRenderer.material.HasProperty("_EmissionColor"))
+                    {
+                        rgbCoreRenderer.material.SetColor("_EmissionColor", Color.black);
+                    }
+                }
+                else
+                {
+                    rgbCoreRenderer.material.color = activeColor;
+                    if (rgbCoreRenderer.material.HasProperty("_EmissionColor"))
+                    {
+                        rgbCoreRenderer.material.EnableKeyword("_EMISSION");
+                        rgbCoreRenderer.material.SetColor("_EmissionColor", activeColor * 2.0f);
+                    }
+                }
+            }
+
+            // 2. Update Impact Feedback (Tracer line, Muzzle light, Impact flash)
+            if (impactFeedback != null && activeAmmo != Ammo.AmmoType.Empty)
+            {
+                impactFeedback.SetFeedbackColor(activeColor);
+            }
+
+            // 3. Update Crosshair UI color
+            if (crosshairUI == null)
+            {
+                crosshairUI = GetComponentInChildren<UI.CrosshairUI>();
+                if (crosshairUI == null)
+                {
+                    crosshairUI = FindFirstObjectByType<UI.CrosshairUI>();
+                }
+            }
+
+            if (crosshairUI != null)
+            {
+                crosshairUI.SetCrosshairColor(activeAmmo == Ammo.AmmoType.Empty ? new Color(0.4f, 0.4f, 0.45f, 0.5f) : activeColor);
+            }
+
+            // 4. Update Chamber Glow Light
+            if (chamberGlowLight == null)
+            {
+                Transform glowTr = transform.Find("ChamberGlow");
+                if (glowTr != null) chamberGlowLight = glowTr.GetComponent<Light>();
+            }
+            if (chamberGlowLight != null)
+            {
+                if (activeAmmo == Ammo.AmmoType.Empty)
+                {
+                    chamberGlowLight.enabled = false;
+                }
+                else
+                {
+                    chamberGlowLight.enabled = true;
+                    chamberGlowLight.color = activeColor;
+                }
+            }
+        }
+
+        public void SetColorMode(SpectrumColorMode mode)
+        {
+            currentMode = mode;
+            ApplyColorMode(mode);
+        }
+
+        private void ApplyColorMode(SpectrumColorMode mode)
+        {
+            Color activeColor = GetModeColor(mode);
+
+            // 1. Update RGB Core Chamber material & emission
+            ResolveCoreRenderer();
+            if (rgbCoreRenderer != null && rgbCoreRenderer.material != null)
+            {
+                rgbCoreRenderer.material.color = activeColor;
+                if (rgbCoreRenderer.material.HasProperty("_EmissionColor"))
+                {
+                    rgbCoreRenderer.material.EnableKeyword("_EMISSION");
+                    rgbCoreRenderer.material.SetColor("_EmissionColor", activeColor * 2.0f);
+                }
+            }
+
+            // 2. Update Impact Feedback (Tracer line, Muzzle light, Impact flash)
+            if (impactFeedback != null)
+            {
+                impactFeedback.SetFeedbackColor(activeColor);
+            }
+
+            // 3. Update Crosshair UI color
+            if (crosshairUI == null)
+            {
+                crosshairUI = GetComponentInChildren<UI.CrosshairUI>();
+                if (crosshairUI == null)
+                {
+                    crosshairUI = FindFirstObjectByType<UI.CrosshairUI>();
+                }
+            }
+
+            if (crosshairUI != null)
+            {
+                crosshairUI.SetCrosshairColor(activeColor);
+            }
+
+            // 4. Update Chamber Glow Light
+            if (chamberGlowLight == null)
+            {
+                Transform glowTr = transform.Find("ChamberGlow");
+                if (glowTr != null) chamberGlowLight = glowTr.GetComponent<Light>();
+            }
+            if (chamberGlowLight != null)
+            {
+                chamberGlowLight.enabled = true;
+                chamberGlowLight.color = activeColor;
+            }
+
+            Debug.Log($"<color=#{ColorUtility.ToHtmlStringRGB(activeColor)}><b>[Spectrum Gun]</b> Switched Mode: {mode.ToString().ToUpper()}</color>");
+        }
+
+        private void ResolveCoreRenderer()
+        {
+            if (rgbCoreRenderer == null)
+            {
+                Transform coreTransform = transform.Find("WeaponMockup/Part_RGBCoreChamber");
+                if (coreTransform != null)
+                {
+                    rgbCoreRenderer = coreTransform.GetComponent<Renderer>();
+                }
+            }
+        }
+
+        public void SetCoreRenderer(Renderer coreRend)
+        {
+            rgbCoreRenderer = coreRend;
+            if (rgbCoreRenderer != null)
+            {
+                if (ammoController != null)
+                {
+                    SyncWithActiveChamber();
+                }
+                else
+                {
+                    ApplyColorMode(currentMode);
+                }
+            }
+        }
+
+        public static Color GetAmmoColor(Ammo.AmmoType type)
+        {
+            switch (type)
+            {
+                case Ammo.AmmoType.Red: return ColorRed;
+                case Ammo.AmmoType.Green: return ColorGreen;
+                case Ammo.AmmoType.Cyan: return ColorBlue;
+                default: return new Color(0.2f, 0.2f, 0.2f, 0.3f);
+            }
+        }
+
+        public static Color GetModeColor(SpectrumColorMode mode)
+        {
+            switch (mode)
+            {
+                case SpectrumColorMode.Red: return ColorRed;
+                case SpectrumColorMode.Green: return ColorGreen;
+                case SpectrumColorMode.Blue: return ColorBlue;
+                default: return ColorRed;
+            }
+        }
+    }
+}
