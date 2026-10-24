@@ -29,8 +29,14 @@ namespace Recorded.Weapons
         private static readonly int ReloadTrigger = Animator.StringToHash("Reload");
         public bool IsReloading => _isReloading;
         public const float ReloadRefillPoint = 1.05f / 1.8f;
+        public const float ReloadInsertionStart = 0.40f;
+        public const float ReloadInsertionEnd = 0.66f;
         public bool ReloadAmmoLoaded { get; private set; }
         public float ReloadProgress => TryGetReloadState(out var state) ? Mathf.Clamp01(state.normalizedTime) : 0f;
+        public Ammo.CylinderAmmoController AmmoController => ammoController;
+        public Ammo.CylinderRotationController RotationController => rotationController;
+        // Cartridges travel into the bores from normalized 0.40 to 0.66. Pauses freeze this with the clip.
+        public float ReloadInsertion => Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(ReloadInsertionStart, ReloadInsertionEnd, ReloadProgress));
         private bool _isReloading;
         private Coroutine _reloadRoutine;
 
