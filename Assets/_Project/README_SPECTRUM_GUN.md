@@ -16,25 +16,25 @@ The **Spectrum Gun** is a 6-chamber sci-fi revolver that fires three elemental/c
 ---
 
 ## 2. Controls & Keybindings
-- **Left Mouse Button (`LMB`)**: Fire the active chamber at the **6 o'clock** bottom firing position.
-  - If the 6 o'clock chamber is loaded: consumes the round, fires a barrel-tip raycast/bolt/tracer, applies the skill & RGB color state, and auto-advances the cylinder by `60°`.
-  - If the 6 o'clock chamber is empty: plays a dry-fire click and does **not** advance the cylinder.
-- **`Q` / Mouse Scroll Up**: Manually rotate the cylinder left (`+60°`, brings the 4 o'clock chamber into the 6 o'clock firing bracket).
-- **`E` / Mouse Scroll Down**: Manually rotate the cylinder right (`-60°`, brings the 8 o'clock chamber into the 6 o'clock firing bracket).
+- **Left Mouse Button (`LMB`)**: Fire the active chamber at the **12 o'clock** top firing position (aligned with the revolver's barrel).
+  - If the 12 o'clock chamber is loaded: consumes the round, fires a barrel-tip raycast/bolt/tracer, applies the skill & RGB color state, and auto-advances the cylinder counter-clockwise (`+60°` on Z from the shooter's rear view, bringing the 2 o'clock chamber into 12 o'clock like a real revolver).
+  - If the 12 o'clock chamber is empty: plays a dry-fire click and does **not** advance the cylinder.
+- **`Q` / Mouse Scroll Up**: Manually rotate the cylinder counter-clockwise (`+60°`, moves 12 o'clock chamber left to 10 o'clock and brings the 2 o'clock chamber into the 12 o'clock firing bracket).
+- **`E` / Mouse Scroll Down**: Manually rotate the cylinder clockwise (`-60°`, moves 12 o'clock chamber right to 2 o'clock and brings the 10 o'clock chamber into the 12 o'clock firing bracket).
 - **`R` (Test Reload)**: Fills all 6 chambers with a randomized distribution of **RED**, **GREEN**, and **CYAN** rounds (`AmmoTestInput`).
 
 ---
 
 ## 3. Architecture & Key Scripts
 - **`Assets/_Project/Scripts/Weapons/`**
-  - `SpectrumGunController.cs`: Master weapon controller, input handling, recoil animation, 6 o'clock chamber sync, and firing logic.
+  - `SpectrumGunController.cs`: Master weapon controller, input handling, recoil animation, 12 o'clock chamber sync, and firing logic.
   - `RaycastWeapon.cs`: Center-screen aim raycast with automatic barrel-tip `MuzzlePoint` resolution and close-range barrel obstruction checks.
   - `WeaponImpactFeedback.cs`: Pooled muzzle flash flare, high-speed energy bolt projectile, tapering beam tracer from `MuzzlePoint`, and surface impact flashes.
   - `RevolverWeaponBuilder.cs`: Builds `REV.fbx` with exact upper-barrel-bore `MuzzlePoint` calculation and ergonomic first-person viewmodel placement `(0.14, -0.11, 0.25)`.
 - **`Assets/_Project/Scripts/UI/Ammo/`**
   - `CylinderAmmoController.cs`: 6-chamber data model and events (`OnChamberStateChanged`, `OnActiveChamberChanged`, `OnCylinderReloaded`).
   - `CylinderRotationController.cs`: Immediate logical chamber advancement + smooth `60°` mechanical ratchet rotation on `Rotating_InnerCylinder`.
-  - `CylinderAmmoHUD.cs` & `CylinderUISpriteFactory.cs`: Industrial gunmetal 6-chamber HUD with exterior cylinder flutes, ratchet hub spokes, and a stationary **6 o'clock** active chamber reticle bracket & chevron indicator.
+  - `CylinderAmmoHUD.cs` & `CylinderUISpriteFactory.cs`: Industrial gunmetal 6-chamber HUD with exterior cylinder flutes, ratchet hub spokes, and a stationary **12 o'clock** active chamber reticle bracket & chevron indicator.
 - **`Assets/_Project/Scripts/ColorSystem/`**
   - `RGBColorTarget.cs`: 8-state additive RGB state machine (`None`, `Red`, `Green`, `Blue`, `Yellow`, `Magenta`, `Cyan`, `White`) with independent 5-second timers per primary color and `MaterialPropertyBlock` rendering.
   - `SpectrumSkillResponder.cs`: Physical weapon skills (**RED Impulse**, **GREEN Bind**, **CYAN Stasis**) with independent skill durations and safe `Rigidbody` state restoration.

@@ -1,4 +1,4 @@
-﻿using System.Collections;
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -111,16 +111,17 @@ namespace Recorded.Weapons
         private void InitializeTracerAndBolt()
         {
             Transform existingLine = transform.Find("WeaponTracer_Line");
-            if (existingLine != null)
+            GameObject tracerObj = existingLine != null ? existingLine.gameObject : new GameObject("WeaponTracer_Line");
+            if (existingLine == null)
             {
-                if (Application.isPlaying) Destroy(existingLine.gameObject);
-                else DestroyImmediate(existingLine.gameObject);
+                tracerObj.transform.SetParent(transform, false);
             }
 
-            GameObject tracerObj = new GameObject("WeaponTracer_Line");
-            tracerObj.transform.SetParent(transform, false);
-
-            _tracerLine = tracerObj.AddComponent<LineRenderer>();
+            _tracerLine = tracerObj.GetComponent<LineRenderer>();
+            if (_tracerLine == null)
+            {
+                _tracerLine = tracerObj.AddComponent<LineRenderer>();
+            }
             _tracerLine.startWidth = tracerWidth;
             _tracerLine.endWidth = tracerWidth * 0.35f;
             _tracerLine.positionCount = 2;
@@ -133,34 +134,34 @@ namespace Recorded.Weapons
             if (lineShader == null) lineShader = Shader.Find("Sprites/Default");
 
             Material lineMat = new Material(lineShader) { color = tracerColor };
-            _tracerLine.material = lineMat;
+            _tracerLine.sharedMaterial = lineMat;
             _tracerLine.enabled = false;
 
             // High-speed visible energy bolt sphere/capsule that travels from barrel tip to target
             Transform existingBolt = transform.Find("WeaponProjectile_Bolt");
             if (existingBolt != null)
             {
-                if (Application.isPlaying) Destroy(existingBolt.gameObject);
-                else DestroyImmediate(existingBolt.gameObject);
+                _projectileBolt = existingBolt.gameObject;
             }
-
-            _projectileBolt = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            _projectileBolt.name = "WeaponProjectile_Bolt";
-            _projectileBolt.transform.SetParent(transform, false);
+            else
+            {
+                _projectileBolt = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+                _projectileBolt.name = "WeaponProjectile_Bolt";
+                _projectileBolt.transform.SetParent(transform, false);
+            }
             _projectileBolt.transform.localScale = new Vector3(0.035f, 0.035f, 0.18f);
 
             Collider boltCol = _projectileBolt.GetComponent<Collider>();
             if (boltCol != null)
             {
-                if (Application.isPlaying) Destroy(boltCol);
-                else DestroyImmediate(boltCol);
+                boltCol.enabled = false;
             }
 
             Material boltMat = new Material(lineShader) { color = tracerColor };
             _projectileBoltRenderer = _projectileBolt.GetComponent<Renderer>();
             if (_projectileBoltRenderer != null)
             {
-                _projectileBoltRenderer.material = boltMat;
+                _projectileBoltRenderer.sharedMaterial = boltMat;
                 _projectileBoltRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
                 _projectileBoltRenderer.receiveShadows = false;
             }
@@ -169,19 +170,20 @@ namespace Recorded.Weapons
 
         private void InitializeImpactPool()
         {
-            // Clean up any stale pooled children from previous runs
-            for (int i = transform.childCount - 1; i >= 0; i--)
+            _impactPool.Clear();
+
+            // Reuse any existing ImpactEffect_Procedural children (safe inside Prefab instances)
+            for (int i = 0; i < transform.childCount; i++)
             {
                 Transform child = transform.GetChild(i);
                 if (child.name.StartsWith("ImpactEffect_Procedural"))
                 {
-                    if (Application.isPlaying) Destroy(child.gameObject);
-                    else DestroyImmediate(child.gameObject);
+                    child.gameObject.SetActive(false);
+                    _impactPool.Enqueue(child.gameObject);
                 }
             }
 
-            _impactPool.Clear();
-            for (int i = 0; i < InitialPoolSize; i++)
+            while (_impactPool.Count < InitialPoolSize)
             {
                 GameObject impact = CreateDefaultImpactObject();
                 impact.SetActive(false);
@@ -212,8 +214,7 @@ namespace Recorded.Weapons
             Collider col = core.GetComponent<Collider>();
             if (col != null)
             {
-                if (Application.isPlaying) Destroy(col);
-                else DestroyImmediate(col);
+                col.enabled = false;
             }
 
             Shader unlitShader = Shader.Find("Universal Render Pipeline/Unlit");
@@ -223,7 +224,7 @@ namespace Recorded.Weapons
             Renderer rend = core.GetComponent<Renderer>();
             if (rend != null)
             {
-                rend.material = mat;
+                rend.sharedMaterial = mat;
                 rend.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
                 rend.receiveShadows = false;
             }
@@ -347,7 +348,7 @@ namespace Recorded.Weapons
             Light l = impactObj.GetComponent<Light>();
             if (l != null) l.color = impactColor;
             Renderer r = impactObj.GetComponentInChildren<Renderer>();
-            if (r != null && r.material != null) r.material.color = impactColor;
+            if (r != null && r.sharedMaterial != null) r.sharedMaterial.color = impactColor;
 
             impactObj.SetActive(true);
             StartCoroutine(RecycleImpactRoutine(impactObj));
@@ -388,14 +389,14 @@ namespace Recorded.Weapons
             tracerColor = color;
             impactColor = color;
 
-            if (_tracerLine != null && _tracerLine.material != null)
+            if (_tracerLine != null && _tracerLine.sharedMaterial != null)
             {
-                _tracerLine.material.color = color;
+                _tracerLine.sharedMaterial.color = color;
             }
 
-            if (_projectileBoltRenderer != null && _projectileBoltRenderer.material != null)
+            if (_projectileBoltRenderer != null && _projectileBoltRenderer.sharedMaterial != null)
             {
-                _projectileBoltRenderer.material.color = color;
+                _projectileBoltRenderer.sharedMaterial.color = color;
             }
 
             if (_muzzleFlareRenderer != null && _muzzleFlareRenderer.sharedMaterial != null)

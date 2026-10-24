@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 using UnityEditor;
 using Recorded.Testing;
 using Recorded.Testing.Editor;
@@ -11,7 +11,7 @@ namespace Recorded.EditorTools
     [InitializeOnLoad]
     public static class RevolverSceneSetupMenu
     {
-        private const string VerifyKey = "RECORDED_OVERHAUL_V2_DONE";
+        private const string VerifyKey = "RECORDED_OVERHAUL_12OCLOCK_V1";
 
         static RevolverSceneSetupMenu()
         {
@@ -20,9 +20,9 @@ namespace Recorded.EditorTools
                 SessionState.SetBool(VerifyKey, true);
                 EditorApplication.delayCall += () =>
                 {
-                    if (!EditorApplication.isPlayingOrWillChangePlaymode)
+                    if (!EditorApplication.isPlayingOrWillChangePlaymode && !Application.isPlaying)
                     {
-                        ExecuteOverhaulSceneRebuild();
+                        RebuildCylinderHUDInActiveScene();
                         RGBColorSystemVerificationTests.RunAllTests();
                     }
                 };
@@ -37,14 +37,10 @@ namespace Recorded.EditorTools
             RGBColorSystemVerificationTests.RunAllTests();
         }
 
-        public static void ExecuteOverhaulSceneRebuild()
+        public static void RebuildCylinderHUDInActiveScene()
         {
-            if (EditorApplication.isPlayingOrWillChangePlaymode) return;
+            if (EditorApplication.isPlayingOrWillChangePlaymode || Application.isPlaying) return;
 
-            RevolverSetupUtility.CreateOrUpdateRevolverPrefab();
-            RevolverSetupUtility.SetupRevolverInActiveScene(true);
-
-            // Rebuild CylinderAmmoHUD in active scene so serialized canvas matches the new 6 o'clock bracket UI
             var hud = Object.FindFirstObjectByType<Recorded.Weapons.Ammo.CylinderAmmoHUD>();
             if (hud != null)
             {
@@ -53,7 +49,25 @@ namespace Recorded.EditorTools
                     Object.DestroyImmediate(hud.transform.GetChild(c).gameObject);
                 }
                 hud.BuildHUDHierarchy();
+
+                var activeScene = UnityEditor.SceneManagement.EditorSceneManager.GetActiveScene();
+                if (activeScene.IsValid())
+                {
+                    UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(activeScene);
+                    UnityEditor.SceneManagement.EditorSceneManager.SaveScene(activeScene);
+                }
             }
+        }
+
+        public static void ExecuteOverhaulSceneRebuild()
+        {
+            if (EditorApplication.isPlayingOrWillChangePlaymode) return;
+
+            RevolverSetupUtility.CreateOrUpdateRevolverPrefab();
+            RevolverSetupUtility.SetupRevolverInActiveScene(true);
+
+            // Rebuild CylinderAmmoHUD in active scene so serialized canvas matches the 12 o'clock bracket UI
+            RebuildCylinderHUDInActiveScene();
 
             // Ensure bootstrap updates targets with Rigidbody + SpectrumSkillResponder
             var bootstrap = Object.FindFirstObjectByType<DevGameTestBootstrap>();

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections;
 using UnityEngine;
 
@@ -7,7 +7,7 @@ namespace Recorded.Weapons.Ammo
     /// <summary>
     /// Controls the physical rotation angle and animation of the inner cylinder.
     /// Manages Q/E and Mouse Scroll manual rotation and automatic advancement after firing.
-    /// Synchronizes rotation angle with the active chamber index at the fixed 6 o'clock firing position.
+    /// Synchronizes rotation angle with the active chamber index at the fixed 12 o'clock firing position.
     /// </summary>
     public class CylinderRotationController : MonoBehaviour
     {
@@ -44,7 +44,7 @@ namespace Recorded.Weapons.Ammo
         {
             ResolveDependencies();
 
-            // Sync initial visual orientation (Chamber activeIndex aligned at 6 o'clock)
+            // Sync initial visual orientation (Chamber activeIndex aligned at 12 o'clock)
             int activeIndex = ammoController != null ? ammoController.ActiveChamberIndex : 0;
             _currentAngle = activeIndex * ChamberAngleStep;
             _targetAngle = _currentAngle;
@@ -78,8 +78,8 @@ namespace Recorded.Weapons.Ammo
         }
 
         /// <summary>
-        /// Rotate cylinder so the bottom (6 o'clock) chamber moves to the left according to player's rear view (Q key / Scroll Up).
-        /// Brings the right-hand chamber (4 o'clock, +1 index) into the 6 o'clock firing indicator.
+        /// Rotate cylinder counter-clockwise from the shooter's rear view (Q key / Scroll Up), matching real revolver rotation.
+        /// Moves the top (12 o'clock) chamber to the left (10 o'clock) and brings the upper-right chamber (2 o'clock, +1 index) into the 12 o'clock firing indicator.
         /// </summary>
         public void RotateLeft()
         {
@@ -87,8 +87,8 @@ namespace Recorded.Weapons.Ammo
         }
 
         /// <summary>
-        /// Rotate cylinder so the bottom (6 o'clock) chamber moves to the right according to player's rear view (E key / Scroll Down).
-        /// Brings the left-hand chamber (8 o'clock, -1 index) into the 6 o'clock firing indicator.
+        /// Rotate cylinder clockwise from the shooter's rear view (E key / Scroll Down).
+        /// Moves the top (12 o'clock) chamber to the right (2 o'clock) and brings the upper-left chamber (10 o'clock, -1 index) into the 12 o'clock firing indicator.
         /// </summary>
         public void RotateRight()
         {
@@ -96,11 +96,11 @@ namespace Recorded.Weapons.Ammo
         }
 
         /// <summary>
-        /// Automatically advance cylinder to the next chamber following a successful shot.
+        /// Automatically advance cylinder in real revolver direction (+1 index, counter-clockwise from rear view) following a successful shot.
         /// </summary>
         public void AutoAdvance()
         {
-            RotateChamberStep(1); // Advances to next sequential chamber
+            RotateChamberStep(1); // Advances next clockwise-indexed chamber (at 2 o'clock) into 12 o'clock
         }
 
         public void RotateChamberStep(int indexDelta)

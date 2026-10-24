@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 using UnityEngine.InputSystem;
 using Recorded.ColorSystem;
 
@@ -349,7 +349,7 @@ namespace Recorded.Weapons
         }
 
         /// <summary>
-        /// Execute shot if cooldown has elapsed and cylinder has ammo at the 6 o'clock firing position.
+        /// Execute shot if cooldown has elapsed and cylinder has ammo at the 12 o'clock firing position.
         /// Consumes the round, fires raycast from exact MuzzlePoint with matching color, and auto-advances the cylinder.
         /// </summary>
         public bool AttemptFire()
@@ -368,8 +368,8 @@ namespace Recorded.Weapons
             {
                 if (!ammoController.HasActiveRound)
                 {
-                    // Dry fire: Chamber at 6 o'clock is empty
-                    Debug.Log("<color=#888888><b>[Spectrum Gun]</b> *CLICK* (Dry Fire) - 6 o'clock chamber is EMPTY. No shot fired, cylinder does not advance.</color>");
+                    // Dry fire: Chamber at 12 o'clock is empty
+                    Debug.Log("<color=#888888><b>[Spectrum Gun]</b> *CLICK* (Dry Fire) - 12 o'clock chamber is EMPTY. No shot fired, cylinder does not advance.</color>");
                     TriggerRecoilImpulse(0.22f);
                     _nextFireTime = Time.time + 0.22f; // Short dry-fire debounce
                     return false;
@@ -544,7 +544,7 @@ namespace Recorded.Weapons
         }
 
         /// <summary>
-        /// Synchronizes the 3D gun core visual, crosshair color, and impact feedback with the 6 o'clock chamber.
+        /// Synchronizes the 3D gun core visual, crosshair color, and impact feedback with the 12 o'clock chamber.
         /// </summary>
         public void SyncWithActiveChamber()
         {

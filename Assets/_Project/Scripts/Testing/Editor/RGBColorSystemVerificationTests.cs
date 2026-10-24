@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using UnityEditor;
 using UnityEngine;
 using Recorded.ColorSystem;
@@ -10,7 +10,7 @@ namespace Recorded.Testing.Editor
     /// <summary>
     /// Automated Editor verification suite for the RECORDED Spectrum Gun Overhaul:
     /// - 8-state RGB additive color mixing & independent 5-second timers
-    /// - 6 o'clock Cylinder Ammo HUD, rotation sync, and dry-fire rules
+    /// - 12 o'clock Cylinder Ammo HUD, real revolver rotation sync, and dry-fire rules
     /// - Real physical weapon skills (RED Impulse, GREEN Bind SpringJoint & independent timer, CYAN Stasis & independent timer)
     /// - Exact barrel-tip MuzzlePoint resolution and close-range viewmodel placement
     /// - ColorPuzzleCondition integration
@@ -21,7 +21,7 @@ namespace Recorded.Testing.Editor
         public static void RunAllTests()
         {
             StringBuilder results = new StringBuilder();
-            results.AppendLine("<b>[RECORDED QA] Running Automated RGB Color, Weapon Skills, Muzzle & 6-O'Clock Cylinder Verification Suite (28 Cases):</b>");
+            results.AppendLine("<b>[RECORDED QA] Running Automated RGB Color, Weapon Skills, Muzzle & 12-O'Clock Cylinder Verification Suite (28 Cases):</b>");
 
             int passedCount = 0;
             int totalCount = 28;
@@ -191,14 +191,14 @@ namespace Recorded.Testing.Editor
                 bool pass17 = (childBlock.GetColor("_BaseColor") == RGBColorTarget.ColorMagenta);
                 LogCase(17, "Multi-renderer hierarchy updates child renderers via MaterialPropertyBlock", pass17, ref passedCount, results);
 
-                // Case 18: Cylinder 6 o'clock Indicator, Bracket & Chamber 0 bottom alignment
+                // Case 18: Cylinder 12 o'clock Indicator, Bracket & Chamber 0 top alignment
                 hud.BuildHUDHierarchy();
-                Transform ind6 = ammoSysObj.transform.Find("CylinderAmmo_Canvas/CylinderHUD_Root/Stationary_6oclock_FiringIndicator");
-                Transform bracket6 = ammoSysObj.transform.Find("CylinderAmmo_Canvas/CylinderHUD_Root/Stationary_6oclock_ChamberBracket");
+                Transform ind12 = ammoSysObj.transform.Find("CylinderAmmo_Canvas/CylinderHUD_Root/Stationary_12oclock_FiringIndicator");
+                Transform bracket12 = ammoSysObj.transform.Find("CylinderAmmo_Canvas/CylinderHUD_Root/Stationary_12oclock_ChamberBracket");
                 Transform ch0 = ammoSysObj.transform.Find("CylinderAmmo_Canvas/CylinderHUD_Root/Rotating_InnerCylinder/Chamber_0");
                 RectTransform ch0Rt = ch0 != null ? ch0.GetComponent<RectTransform>() : null;
-                bool pass18 = (ind6 != null) && (bracket6 != null) && (ch0Rt != null) && (ch0Rt.anchoredPosition.y < -10f) && Mathf.Abs(ch0Rt.anchoredPosition.x) < 1f;
-                LogCase(18, "Cylinder HUD places stationary firing indicator/bracket and Chamber_0 at 6 o'clock bottom", pass18, ref passedCount, results);
+                bool pass18 = (ind12 != null) && (bracket12 != null) && (ch0Rt != null) && (ch0Rt.anchoredPosition.y > 10f) && Mathf.Abs(ch0Rt.anchoredPosition.x) < 1f;
+                LogCase(18, "Cylinder HUD places stationary firing indicator/bracket and Chamber_0 at 12 o'clock top", pass18, ref passedCount, results);
 
                 // Case 19: Cylinder TestReloadRandom fills all 6 chambers with Red/Green/Cyan
                 ammoCtrl.TestReloadRandom();
