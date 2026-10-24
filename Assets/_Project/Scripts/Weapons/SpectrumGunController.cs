@@ -13,7 +13,7 @@ namespace Recorded.Weapons
 
     /// <summary>
     /// Master controller for the RECORDED Spectrum Gun.
-    /// Manages fire rate, input handling, 8-chamber cylinder integration, first-person viewmodel
+    /// Manages fire rate, input handling, 6-chamber cylinder integration, first-person viewmodel
     /// ergonomics/recoil animation, and real-time color synchronization across Weapon Core, Crosshair, and VFX.
     /// </summary>
     public class SpectrumGunController : MonoBehaviour
@@ -28,12 +28,9 @@ namespace Recorded.Weapons
         private static readonly int FireTrigger = Animator.StringToHash("Fire");
         private static readonly int ReloadTrigger = Animator.StringToHash("Reload");
         public bool IsReloading => _isReloading;
-        public const float ReloadRefillPoint = 0.66f;
+        public const float ReloadRefillPoint = 1.05f / 1.8f;
         public bool ReloadAmmoLoaded { get; private set; }
         public float ReloadProgress => TryGetReloadState(out var state) ? Mathf.Clamp01(state.normalizedTime) : 0f;
-        public float ReloadInsertion => Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(0.40f, ReloadRefillPoint, ReloadProgress));
-        internal Ammo.CylinderAmmoController AmmoController => ammoController;
-        internal Ammo.CylinderRotationController RotationController => rotationController;
         private bool _isReloading;
         private Coroutine _reloadRoutine;
 
@@ -86,8 +83,6 @@ namespace Recorded.Weapons
         {
             ResolveDependencies();
             EnsureViewmodelAndMuzzleAlignment();
-            if (transform.Find("Barrel") != null && GetComponent<RevolverReloadPresentation>() == null)
-                gameObject.AddComponent<RevolverReloadPresentation>();
 
             if (ammoController != null)
             {
@@ -209,8 +204,7 @@ namespace Recorded.Weapons
             _reloadRoutine = null;
             _isReloading = false;
             ReloadAmmoLoaded = false;
-            if (gameObject.activeInHierarchy && shotAnimator != null && shotAnimator.gameObject.activeInHierarchy
-                && shotAnimator.isActiveAndEnabled && shotAnimator.isInitialized)
+            if (shotAnimator != null && shotAnimator.isActiveAndEnabled && shotAnimator.isInitialized)
             {
                 shotAnimator.ResetTrigger(FireTrigger);
                 shotAnimator.ResetTrigger(ReloadTrigger);
@@ -303,9 +297,7 @@ namespace Recorded.Weapons
                     }
                     else if (Keyboard.current.eKey.wasPressedThisFrame)
                     {
-                        var body = GetComponentInParent<CharacterController>();
-                        var player = body != null ? body.transform : transform.root;
-                        if (!SecurityKioskEInteraction.HasInteractionFor(player)) rotationController.RotateRight();
+                        rotationController.RotateRight();
                         return;
                     }
                 }
@@ -454,25 +446,7 @@ namespace Recorded.Weapons
                             ? (hitInfo.point - muzzlePos).normalized
                             : transform.forward;
 
-                        // 1. Trigger immediate shot impact skills (RED Impulse, GREEN Bind, CYAN Stasis)
-                        IColorShotImpact[] shotImpacts = hitInfo.collider.GetComponentsInParent<IColorShotImpact>();
-                        if (shotImpacts != null)
-                        {
-                            for (int i = 0; i < shotImpacts.Length; i++)
-                            {
-                                shotImpacts[i].OnColorShotHit(firedAmmo, shotColorState, hitInfo, shotDir);
-                            }
-                        }
-
-                        // 2. Apply persistent RGB color state; the target owns its duration and mix reactions.
-                        if (shotColorState != ObjectColorState.None)
-                        {
-                            IColorReceivable target = hitInfo.collider.GetComponentInParent<IColorReceivable>();
-                            if (target != null)
-                            {
-                                target.ApplyColor(shotColorState);
-                            }
-                        }
+                        DeliverColorPayload(hitInfo, firedAmmo, shotColorState, shotDir);
 
                         if (impactFeedback != null)
                         {
@@ -527,23 +501,7 @@ namespace Recorded.Weapons
                     ? (fallbackHitInfo.point - fallbackMuzzlePos).normalized
                     : transform.forward;
 
-                IColorShotImpact[] shotImpacts = fallbackHitInfo.collider.GetComponentsInParent<IColorShotImpact>();
-                if (shotImpacts != null)
-                {
-                    for (int i = 0; i < shotImpacts.Length; i++)
-                    {
-                        shotImpacts[i].OnColorShotHit(fallbackAmmo, fallbackState, fallbackHitInfo, fallbackShotDir);
-                    }
-                }
-
-                if (fallbackState != ObjectColorState.None)
-                {
-                    IColorReceivable target = fallbackHitInfo.collider.GetComponentInParent<IColorReceivable>();
-                    if (target != null)
-                    {
-                        target.ApplyColor(fallbackState);
-                    }
-                }
+                DeliverColorPayload(fallbackHitInfo, fallbackAmmo, fallbackState, fallbackShotDir);
 
                 if (impactFeedback != null)
                 {
@@ -560,6 +518,32 @@ namespace Recorded.Weapons
 
             PlayShotAnimation();
             return true;
+        }
+
+        /// <summary>
+        /// Walls block the ray because they are on Default. Color is delivered only when the hit
+        /// collider is on ColorInteractable and exposes IColorTarget.
+        /// </summary>
+        private void DeliverColorPayload(RaycastHit hitInfo, Ammo.AmmoType firedAmmo, ObjectColorState shotColorState, Vector3 shotDir)
+        {
+            if (!ColorInteractable.Is(hitInfo.collider)) return;
+
+            IColorShotImpact[] shotImpacts = hitInfo.collider.GetComponentsInParent<IColorShotImpact>();
+            if (shotImpacts != null)
+            {
+                for (int i = 0; i < shotImpacts.Length; i++)
+                {
+                    shotImpacts[i].OnColorShotHit(firedAmmo, shotColorState, hitInfo, shotDir);
+                }
+            }
+
+            if (shotColorState == ObjectColorState.None) return;
+
+            IColorTarget target = hitInfo.collider.GetComponentInParent<IColorTarget>();
+            if (target != null)
+            {
+                target.ApplyColor(shotColorState);
+            }
         }
 
         private void PlayShotAnimation()

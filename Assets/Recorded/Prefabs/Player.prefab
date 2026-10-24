@@ -1482,7 +1482,7 @@ MonoBehaviour:
   maxRange: 100
   hitLayers:
     serializedVersion: 2
-    m_Bits: 55
+    m_Bits: 567
   triggerInteraction: 1
 --- !u!114 &3243064907257434209
 MonoBehaviour:
