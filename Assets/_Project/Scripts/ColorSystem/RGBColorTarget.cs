@@ -6,13 +6,13 @@ namespace Recorded.ColorSystem
     /// <summary>
     /// Implements the RECORDED RGB object color-state system.
     /// Manages an additive RGB state flag (None, Red, Green, Blue, Yellow, Magenta, Cyan, White),
-    /// independent 5-second expiration timers per primary color,
+    /// independent 10-second expiration timers per primary color,
     /// duplicate-hit protection (hitting an already active color does not reset or extend its timer),
     /// and visual representation via MaterialPropertyBlock (_BaseColor / _Color) across single or multiple renderers.
     /// </summary>
     public class RGBColorTarget : MonoBehaviour, IColorReceivable
     {
-        public const float ColorDuration = 5.0f;
+        public const float ColorDuration = 10.0f;
 
         [Header("State")]
         [Tooltip("Active color combination flags.")]
@@ -36,6 +36,11 @@ namespace Recorded.ColorSystem
         private float _expireRed = -1f;
         private float _expireGreen = -1f;
         private float _expireBlue = -1f;
+
+        private bool _pauseExpireRed;
+        private bool _pauseExpireGreen;
+        private bool _pauseExpireBlue;
+        private bool _cyanStasisOverride;
 
         private Renderer _renderer;
         private Renderer[] _renderers;
@@ -83,7 +88,7 @@ namespace Recorded.ColorSystem
             bool stateChanged = false;
 
             // Check Red expiration
-            if ((currentState & ObjectColorState.Red) != 0 && now >= _expireRed)
+            if (!_pauseExpireRed && (currentState & ObjectColorState.Red) != 0 && now >= _expireRed)
             {
                 currentState &= ~ObjectColorState.Red;
                 _expireRed = -1f;
@@ -91,7 +96,7 @@ namespace Recorded.ColorSystem
             }
 
             // Check Green expiration
-            if ((currentState & ObjectColorState.Green) != 0 && now >= _expireGreen)
+            if (!_pauseExpireGreen && (currentState & ObjectColorState.Green) != 0 && now >= _expireGreen)
             {
                 currentState &= ~ObjectColorState.Green;
                 _expireGreen = -1f;
@@ -99,7 +104,7 @@ namespace Recorded.ColorSystem
             }
 
             // Check Blue expiration
-            if ((currentState & ObjectColorState.Blue) != 0 && now >= _expireBlue)
+            if (!_pauseExpireBlue && (currentState & ObjectColorState.Blue) != 0 && now >= _expireBlue)
             {
                 currentState &= ~ObjectColorState.Blue;
                 _expireBlue = -1f;
@@ -116,11 +121,19 @@ namespace Recorded.ColorSystem
         /// <summary>
         /// Applies one or more primary colors to this target.
         /// Adheres strictly to the duplicate-hit rule:
-        /// - If a color is not currently active, it is added and its 5-second lifetime starts now.
+        /// - If a color is not currently active, it is added and its 10-second lifetime starts now.
         /// - If a color is already active, this call does NOT reset, extend, or restart its timer.
         /// </summary>
         public void ApplyColor(ObjectColorState color)
         {
+            ObjectColorState incoming = color & (ObjectColorState.Red | ObjectColorState.Green | ObjectColorState.Blue);
+            ObjectColorState active = currentState & (ObjectColorState.Red | ObjectColorState.Green | ObjectColorState.Blue);
+            if (incoming == ObjectColorState.Blue && active == (ObjectColorState.Green | ObjectColorState.Blue))
+            {
+                PromoteCyanToBlueStasis();
+                return;
+            }
+
             bool stateChanged = false;
             float now = Time.time;
 
@@ -176,8 +189,92 @@ namespace Recorded.ColorSystem
             _expireRed = -1f;
             _expireGreen = -1f;
             _expireBlue = -1f;
+            _pauseExpireRed = false;
+            _pauseExpireGreen = false;
+            _pauseExpireBlue = false;
+            _cyanStasisOverride = false;
             UpdateVisuals();
             OnColorStateChanged?.Invoke(currentState);
+        }
+
+        /// <summary>
+        /// True only for the state-change caused by shooting Blue again while Cyan is active.
+        /// The reactor consumes this so that shot locks Blue stasis instead of clearing to None.
+        /// </summary>
+        public bool ConsumeCyanStasisOverride()
+        {
+            if (!_cyanStasisOverride) return false;
+            _cyanStasisOverride = false;
+            return true;
+        }
+
+        /// <summary>
+        /// Cyan + another Blue shot: drop Green immediately and leave only Blue.
+        /// The existing Blue timer is not refreshed.
+        /// </summary>
+        private void PromoteCyanToBlueStasis()
+        {
+            Rigidbody body = GetComponent<Rigidbody>();
+            if (body != null && !body.isKinematic)
+            {
+                body.linearVelocity = Vector3.zero;
+                body.angularVelocity = Vector3.zero;
+            }
+
+            currentState = ObjectColorState.Blue;
+            _expireGreen = -1f;
+            _pauseExpireGreen = false;
+            _cyanStasisOverride = true;
+            UpdateVisuals();
+            OnColorStateChanged?.Invoke(currentState);
+        }
+
+        /// <summary>
+        /// Pauses expiration for the given primary flags (used by mix reactions: Magenta, Cyan).
+        /// </summary>
+        public void SetPrimaryTimerPaused(ObjectColorState primaries, bool paused)
+        {
+            if ((primaries & ObjectColorState.Red) != 0) _pauseExpireRed = paused;
+            if ((primaries & ObjectColorState.Green) != 0) _pauseExpireGreen = paused;
+            if ((primaries & ObjectColorState.Blue) != 0) _pauseExpireBlue = paused;
+        }
+
+        /// <summary>
+        /// Clears the specified primary bits and their timers without touching other active primaries.
+        /// </summary>
+        public void ClearPrimaries(ObjectColorState primaries)
+        {
+            bool stateChanged = false;
+
+            if ((primaries & ObjectColorState.Red) != 0 && (currentState & ObjectColorState.Red) != 0)
+            {
+                currentState &= ~ObjectColorState.Red;
+                _expireRed = -1f;
+                _pauseExpireRed = false;
+                stateChanged = true;
+            }
+
+            if ((primaries & ObjectColorState.Green) != 0 && (currentState & ObjectColorState.Green) != 0)
+            {
+                currentState &= ~ObjectColorState.Green;
+                _expireGreen = -1f;
+                _pauseExpireGreen = false;
+                stateChanged = true;
+            }
+
+            if ((primaries & ObjectColorState.Blue) != 0 && (currentState & ObjectColorState.Blue) != 0)
+            {
+                currentState &= ~ObjectColorState.Blue;
+                _expireBlue = -1f;
+                _pauseExpireBlue = false;
+                stateChanged = true;
+            }
+
+            if (stateChanged)
+            {
+                UpdateVisuals();
+                OnColorStateChanged?.Invoke(currentState);
+            }
         }
 
         /// <summary>
@@ -285,19 +382,19 @@ namespace Recorded.ColorSystem
         public void SimulateExpirationCheck(float currentTime)
         {
             bool stateChanged = false;
-            if ((currentState & ObjectColorState.Red) != 0 && currentTime >= _expireRed)
+            if (!_pauseExpireRed && (currentState & ObjectColorState.Red) != 0 && currentTime >= _expireRed)
             {
                 currentState &= ~ObjectColorState.Red;
                 _expireRed = -1f;
                 stateChanged = true;
             }
-            if ((currentState & ObjectColorState.Green) != 0 && currentTime >= _expireGreen)
+            if (!_pauseExpireGreen && (currentState & ObjectColorState.Green) != 0 && currentTime >= _expireGreen)
             {
                 currentState &= ~ObjectColorState.Green;
                 _expireGreen = -1f;
                 stateChanged = true;
             }
-            if ((currentState & ObjectColorState.Blue) != 0 && currentTime >= _expireBlue)
+            if (!_pauseExpireBlue && (currentState & ObjectColorState.Blue) != 0 && currentTime >= _expireBlue)
             {
                 currentState &= ~ObjectColorState.Blue;
                 _expireBlue = -1f;
