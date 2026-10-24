@@ -1450,7 +1450,7 @@ MonoBehaviour:
   maxRange: 100
   hitLayers:
     serializedVersion: 2
-    m_Bits: 55
+    m_Bits: 567
   triggerInteraction: 1
 --- !u!114 &3243064907257434209
 MonoBehaviour:
@@ -2084,6 +2084,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d1000004000000000000000000000004, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Recorded.UI.CrosshairUI
+  reticleStyle: 0
   crosshairColor: {r: 0.9, g: 0.95, b: 1, a: 0.85}
   reticleSize: 10
   reticleThickness: 2

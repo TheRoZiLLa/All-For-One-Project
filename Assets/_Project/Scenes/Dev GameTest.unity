@@ -331,6 +331,7 @@ GameObject:
   - component: {fileID: 117104925}
   - component: {fileID: 117104927}
   - component: {fileID: 117104926}
+  - component: {fileID: 117104928}
   m_Layer: 0
   m_Name: Target_Dummy_5m
   m_TagString: Untagged
@@ -476,10 +477,6 @@ MonoBehaviour:
   enableCyanStasis: 1
   cyanStasisDuration: 5
   yellowSlingshotTensionMultiplier: 1.5
-  whiteVortexPullRadius: 6
-  whiteVortexPullForce: 9
-  whiteSupernovaRadius: 6.5
-  whiteSupernovaForce: 24
 --- !u!54 &117104927
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -507,6 +504,44 @@ Rigidbody:
   m_Interpolate: 1
   m_Constraints: 0
   m_CollisionDetection: 0
+--- !u!114 &117104928
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 117104919}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d0c4598da01cd414cbd9a589fbf3c63b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Recorded.ColorSystem.ColorMixPhysicsReactor
+  magentaFuseSeconds: 2.5
+  magentaExplosionForce: 28
+  magentaExplosionRadius: 5
+  magentaUpwardModifier: 1.2
+  magentaSelfVelocityScale: 1.35
+  yellowSnapImpulse: 22
+  yellowPushWeight: 1
+  yellowPullWeight: 1
+  cyanFollowDistance: 4
+  cyanFollowSmoothTime: 0.4
+  cyanFollowMaxSpeed: 10
+  OnMagentaTriggered:
+    m_PersistentCalls:
+      m_Calls: []
+  OnMagentaDetonated:
+    m_PersistentCalls:
+      m_Calls: []
+  OnCyanTriggered:
+    m_PersistentCalls:
+      m_Calls: []
+  OnYellowTriggered:
+    m_PersistentCalls:
+      m_Calls: []
+  OnWhiteTriggered:
+    m_PersistentCalls:
+      m_Calls: []
 --- !u!1 &120893191
 GameObject:
   m_ObjectHideFlags: 0
@@ -1554,6 +1589,7 @@ GameObject:
   - component: {fileID: 423159354}
   - component: {fileID: 423159356}
   - component: {fileID: 423159355}
+  - component: {fileID: 423159357}
   m_Layer: 0
   m_Name: Target_Dummy_20m
   m_TagString: Untagged
@@ -1699,10 +1735,6 @@ MonoBehaviour:
   enableCyanStasis: 1
   cyanStasisDuration: 5
   yellowSlingshotTensionMultiplier: 1.5
-  whiteVortexPullRadius: 6
-  whiteVortexPullForce: 9
-  whiteSupernovaRadius: 6.5
-  whiteSupernovaForce: 24
 --- !u!54 &423159356
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -1730,6 +1762,44 @@ Rigidbody:
   m_Interpolate: 1
   m_Constraints: 0
   m_CollisionDetection: 0
+--- !u!114 &423159357
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 423159348}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d0c4598da01cd414cbd9a589fbf3c63b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Recorded.ColorSystem.ColorMixPhysicsReactor
+  magentaFuseSeconds: 2.5
+  magentaExplosionForce: 28
+  magentaExplosionRadius: 5
+  magentaUpwardModifier: 1.2
+  magentaSelfVelocityScale: 1.35
+  yellowSnapImpulse: 22
+  yellowPushWeight: 1
+  yellowPullWeight: 1
+  cyanFollowDistance: 4
+  cyanFollowSmoothTime: 0.4
+  cyanFollowMaxSpeed: 10
+  OnMagentaTriggered:
+    m_PersistentCalls:
+      m_Calls: []
+  OnMagentaDetonated:
+    m_PersistentCalls:
+      m_Calls: []
+  OnCyanTriggered:
+    m_PersistentCalls:
+      m_Calls: []
+  OnYellowTriggered:
+    m_PersistentCalls:
+      m_Calls: []
+  OnWhiteTriggered:
+    m_PersistentCalls:
+      m_Calls: []
 --- !u!1 &444128839
 GameObject:
   m_ObjectHideFlags: 0
@@ -5429,6 +5499,7 @@ GameObject:
   - component: {fileID: 1693156889}
   - component: {fileID: 1693156891}
   - component: {fileID: 1693156890}
+  - component: {fileID: 1693156892}
   m_Layer: 0
   m_Name: Target_Dummy_32m
   m_TagString: Untagged
@@ -5574,10 +5645,6 @@ MonoBehaviour:
   enableCyanStasis: 1
   cyanStasisDuration: 5
   yellowSlingshotTensionMultiplier: 1.5
-  whiteVortexPullRadius: 6
-  whiteVortexPullForce: 9
-  whiteSupernovaRadius: 6.5
-  whiteSupernovaForce: 24
 --- !u!54 &1693156891
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -5605,6 +5672,44 @@ Rigidbody:
   m_Interpolate: 1
   m_Constraints: 0
   m_CollisionDetection: 0
+--- !u!114 &1693156892
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1693156883}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d0c4598da01cd414cbd9a589fbf3c63b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Recorded.ColorSystem.ColorMixPhysicsReactor
+  magentaFuseSeconds: 2.5
+  magentaExplosionForce: 28
+  magentaExplosionRadius: 5
+  magentaUpwardModifier: 1.2
+  magentaSelfVelocityScale: 1.35
+  yellowSnapImpulse: 22
+  yellowPushWeight: 1
+  yellowPullWeight: 1
+  cyanFollowDistance: 4
+  cyanFollowSmoothTime: 0.4
+  cyanFollowMaxSpeed: 10
+  OnMagentaTriggered:
+    m_PersistentCalls:
+      m_Calls: []
+  OnMagentaDetonated:
+    m_PersistentCalls:
+      m_Calls: []
+  OnCyanTriggered:
+    m_PersistentCalls:
+      m_Calls: []
+  OnYellowTriggered:
+    m_PersistentCalls:
+      m_Calls: []
+  OnWhiteTriggered:
+    m_PersistentCalls:
+      m_Calls: []
 --- !u!1 &1839832622
 GameObject:
   m_ObjectHideFlags: 0
@@ -5620,6 +5725,7 @@ GameObject:
   - component: {fileID: 1839832628}
   - component: {fileID: 1839832630}
   - component: {fileID: 1839832629}
+  - component: {fileID: 1839832631}
   m_Layer: 0
   m_Name: Target_Dummy_12m
   m_TagString: Untagged
@@ -5765,10 +5871,6 @@ MonoBehaviour:
   enableCyanStasis: 1
   cyanStasisDuration: 5
   yellowSlingshotTensionMultiplier: 1.5
-  whiteVortexPullRadius: 6
-  whiteVortexPullForce: 9
-  whiteSupernovaRadius: 6.5
-  whiteSupernovaForce: 24
 --- !u!54 &1839832630
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -5796,6 +5898,44 @@ Rigidbody:
   m_Interpolate: 1
   m_Constraints: 0
   m_CollisionDetection: 0
+--- !u!114 &1839832631
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1839832622}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d0c4598da01cd414cbd9a589fbf3c63b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Recorded.ColorSystem.ColorMixPhysicsReactor
+  magentaFuseSeconds: 2.5
+  magentaExplosionForce: 28
+  magentaExplosionRadius: 5
+  magentaUpwardModifier: 1.2
+  magentaSelfVelocityScale: 1.35
+  yellowSnapImpulse: 22
+  yellowPushWeight: 1
+  yellowPullWeight: 1
+  cyanFollowDistance: 4
+  cyanFollowSmoothTime: 0.4
+  cyanFollowMaxSpeed: 10
+  OnMagentaTriggered:
+    m_PersistentCalls:
+      m_Calls: []
+  OnMagentaDetonated:
+    m_PersistentCalls:
+      m_Calls: []
+  OnCyanTriggered:
+    m_PersistentCalls:
+      m_Calls: []
+  OnYellowTriggered:
+    m_PersistentCalls:
+      m_Calls: []
+  OnWhiteTriggered:
+    m_PersistentCalls:
+      m_Calls: []
 --- !u!1 &1846334742
 GameObject:
   m_ObjectHideFlags: 0

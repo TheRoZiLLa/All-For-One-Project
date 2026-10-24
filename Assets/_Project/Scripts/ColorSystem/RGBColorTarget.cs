@@ -10,13 +10,16 @@ namespace Recorded.ColorSystem
     /// duplicate-hit protection (hitting an already active color does not reset or extend its timer),
     /// and visual representation via MaterialPropertyBlock (_BaseColor / _Color) across single or multiple renderers.
     /// </summary>
-    public class RGBColorTarget : MonoBehaviour, IColorReceivable
+    public class RGBColorTarget : MonoBehaviour, IColorTarget
     {
         public const float ColorDuration = 10.0f;
 
         [Header("State")]
         [Tooltip("Active color combination flags.")]
         [SerializeField] private ObjectColorState currentState = ObjectColorState.None;
+
+        [Tooltip("Puzzle pieces respawn when they fall. Ordinary props do not.")]
+        [SerializeField] private bool isPuzzleCritical;
 
         [Header("Renderer Configuration")]
         [Tooltip("If true, applies color state to all child Renderers as well as the root Renderer.")]
@@ -49,7 +52,24 @@ namespace Recorded.ColorSystem
         private static readonly int ColorPropId = Shader.PropertyToID("_Color");
 
         public ObjectColorState CurrentColorState => currentState;
+        public Rigidbody PhysicsBody => GetComponent<Rigidbody>();
+        public bool IsPuzzleCritical => isPuzzleCritical;
         public event Action<ObjectColorState> OnColorStateChanged;
+
+        public void SetPuzzleCritical(bool value)
+        {
+            isPuzzleCritical = value;
+        }
+
+        /// <summary>
+        /// Mass is over the telekinesis limit. Drop Green and freeze as Blue.
+        /// </summary>
+        public void CollapseOverweightCyanToStasis()
+        {
+            ObjectColorState active = currentState & (ObjectColorState.Red | ObjectColorState.Green | ObjectColorState.Blue);
+            if (active != (ObjectColorState.Green | ObjectColorState.Blue)) return;
+            PromoteCyanToBlueStasis();
+        }
 
         private void Awake()
         {

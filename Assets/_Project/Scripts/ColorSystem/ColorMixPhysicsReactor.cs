@@ -32,6 +32,7 @@ namespace Recorded.ColorSystem
         [SerializeField] private float cyanFollowDistance = 4f;
         [SerializeField] private float cyanFollowSmoothTime = 0.4f;
         [SerializeField] private float cyanFollowMaxSpeed = 10f;
+        [SerializeField] private float maxTelekinesisMass = 50f;
 
         [Header("VFX Hooks (Elias)")]
         public UnityEvent OnMagentaTriggered = new UnityEvent();
@@ -173,6 +174,13 @@ namespace Recorded.ColorSystem
             }
             else if (current == (ObjectColorState.Green | ObjectColorState.Blue) && previous != (ObjectColorState.Green | ObjectColorState.Blue))
             {
+                if (IsTooHeavyToLift())
+                {
+                    _previousPrimaryMask = current;
+                    _colorTarget.CollapseOverweightCyanToStasis();
+                    return;
+                }
+
                 EnterCyanSuspension();
             }
             else if (current == (ObjectColorState.Red | ObjectColorState.Green) && previous != (ObjectColorState.Red | ObjectColorState.Green))
@@ -299,6 +307,11 @@ namespace Recorded.ColorSystem
             {
                 DetonateMagenta();
             }
+        }
+
+        private bool IsTooHeavyToLift()
+        {
+            return _rb != null && _rb.mass > maxTelekinesisMass;
         }
 
         private void EnterCyanSuspension()

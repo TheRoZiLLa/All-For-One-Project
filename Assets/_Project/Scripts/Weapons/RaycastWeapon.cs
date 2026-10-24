@@ -1,4 +1,5 @@
 ﻿using System;
+using Recorded.ColorSystem;
 using UnityEngine;
 
 namespace Recorded.Weapons
@@ -49,6 +50,7 @@ namespace Recorded.Weapons
         {
             ResolveCamera();
             ResolveMuzzlePoint();
+            IncludeColorInteractableLayer();
         }
 
         public void ResolveCamera()
@@ -103,6 +105,7 @@ namespace Recorded.Weapons
         {
             ResolveCamera();
             ResolveMuzzlePoint();
+            IncludeColorInteractableLayer();
 
             // 1. Primary aim ray originating from the exact center of the camera screen (0.5, 0.5)
             Ray aimRay = playerCamera != null
@@ -159,6 +162,17 @@ namespace Recorded.Weapons
             targetPoint = desiredTargetPoint;
             OnTargetMiss?.Invoke(aimRay.origin, aimRay.direction);
             return false;
+        }
+
+        /// <summary>
+        /// The player prefab stored a mask from before ColorInteractable existed, so shots
+        /// passed through every paintable prop. Keep that layer in the mask.
+        /// </summary>
+        private void IncludeColorInteractableLayer()
+        {
+            int colorLayer = ColorInteractable.Layer;
+            if (colorLayer >= 0)
+                hitLayers |= 1 << colorLayer;
         }
 
         private bool TryHit(Ray ray, float distance, out RaycastHit nearest)
