@@ -67,6 +67,17 @@ namespace Recorded
             Velocity = (transform.position - start) / deltaTime;
         }
 
+        public void Teleport(Vector3 position, Quaternion rotation)
+        {
+            if (controller != null) controller.enabled = false;
+            transform.SetPositionAndRotation(position, rotation);
+            verticalVelocity = 0f;
+            movementVelocity = Vector3.zero;
+            externalVelocity = Vector3.zero;
+            Velocity = Vector3.zero;
+            if (controller != null) controller.enabled = true;
+        }
+
         public void ApplyImpulse(Vector3 impulse)
         {
             if (!float.IsFinite(impulse.x) || !float.IsFinite(impulse.y) || !float.IsFinite(impulse.z))

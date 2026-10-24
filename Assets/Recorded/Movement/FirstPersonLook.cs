@@ -78,6 +78,12 @@ namespace Recorded
             else if (Cursor.lockState == CursorLockMode.Locked) ApplyLook(input.LookDelta);
         }
 
+        public void SnapPitch(float pitch)
+        {
+            Pitch = Mathf.Clamp(pitch, -pitchLimit, pitchLimit);
+            if (cameraPivot != null) cameraPivot.localRotation = Quaternion.Euler(Pitch, 0f, 0f);
+        }
+
         public void ApplyLook(Vector2 delta)
         {
             if (cameraPivot == null) return;

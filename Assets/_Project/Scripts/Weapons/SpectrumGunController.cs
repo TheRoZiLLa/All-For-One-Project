@@ -4,6 +4,22 @@ using Recorded.ColorSystem;
 
 namespace Recorded.Weapons
 {
+    public readonly struct SpectrumShotRecord
+    {
+        public readonly Ammo.AmmoType Ammo;
+        public readonly ObjectColorState Color;
+        public readonly Vector3 Origin;
+        public readonly Vector3 Direction;
+
+        public SpectrumShotRecord(Ammo.AmmoType ammo, ObjectColorState color, Vector3 origin, Vector3 direction)
+        {
+            Ammo = ammo;
+            Color = color;
+            Origin = origin;
+            Direction = direction.sqrMagnitude > 0.0001f ? direction.normalized : Vector3.forward;
+        }
+    }
+
     public enum SpectrumColorMode
     {
         Red,    // Impulse
@@ -33,6 +49,7 @@ namespace Recorded.Weapons
         public const float ReloadInsertionEnd = 0.66f;
         public bool ReloadAmmoLoaded { get; private set; }
         public float ReloadProgress => TryGetReloadState(out var state) ? Mathf.Clamp01(state.normalizedTime) : 0f;
+        public event System.Action<SpectrumShotRecord> ShotFired;
         public Ammo.CylinderAmmoController AmmoController => ammoController;
         public Ammo.CylinderRotationController RotationController => rotationController;
         // Cartridges travel into the bores from normalized 0.40 to 0.66. Pauses freeze this with the clip.
@@ -453,6 +470,7 @@ namespace Recorded.Weapons
                             : transform.forward;
 
                         DeliverColorPayload(hitInfo, firedAmmo, shotColorState, shotDir);
+                        NotifyShotFired(muzzlePos, shotDir, firedAmmo, shotColorState);
 
                         if (impactFeedback != null)
                         {
@@ -461,6 +479,10 @@ namespace Recorded.Weapons
                     }
                     else
                     {
+                        Vector3 missDir = (targetPoint - muzzlePos).sqrMagnitude > 0.0001f
+                            ? (targetPoint - muzzlePos).normalized
+                            : transform.forward;
+                        NotifyShotFired(muzzlePos, missDir, firedAmmo, shotColorState);
                         if (impactFeedback != null)
                         {
                             impactFeedback.PlayMissFeedback(muzzlePos, targetPoint);
@@ -496,18 +518,18 @@ namespace Recorded.Weapons
             Vector3 fallbackMuzzlePos = fallbackMuzzle != null ? fallbackMuzzle.position : transform.position;
 
             bool fallbackHit = raycastWeapon.FireRaycast(out RaycastHit fallbackHitInfo, out Vector3 fallbackTargetPoint);
+            Ammo.AmmoType fallbackAmmo = Ammo.AmmoType.Red;
+            if (currentMode == SpectrumColorMode.Green) fallbackAmmo = Ammo.AmmoType.Green;
+            else if (currentMode == SpectrumColorMode.Blue) fallbackAmmo = Ammo.AmmoType.Cyan;
 
             if (fallbackHit)
             {
-                Ammo.AmmoType fallbackAmmo = Ammo.AmmoType.Red;
-                if (currentMode == SpectrumColorMode.Green) fallbackAmmo = Ammo.AmmoType.Green;
-                else if (currentMode == SpectrumColorMode.Blue) fallbackAmmo = Ammo.AmmoType.Cyan;
-
                 Vector3 fallbackShotDir = (fallbackHitInfo.point - fallbackMuzzlePos).sqrMagnitude > 0.0001f
                     ? (fallbackHitInfo.point - fallbackMuzzlePos).normalized
                     : transform.forward;
 
                 DeliverColorPayload(fallbackHitInfo, fallbackAmmo, fallbackState, fallbackShotDir);
+                NotifyShotFired(fallbackMuzzlePos, fallbackShotDir, fallbackAmmo, fallbackState);
 
                 if (impactFeedback != null)
                 {
@@ -516,6 +538,10 @@ namespace Recorded.Weapons
             }
             else
             {
+                Vector3 fallbackMissDir = (fallbackTargetPoint - fallbackMuzzlePos).sqrMagnitude > 0.0001f
+                    ? (fallbackTargetPoint - fallbackMuzzlePos).normalized
+                    : transform.forward;
+                NotifyShotFired(fallbackMuzzlePos, fallbackMissDir, fallbackAmmo, fallbackState);
                 if (impactFeedback != null)
                 {
                     impactFeedback.PlayMissFeedback(fallbackMuzzlePos, fallbackTargetPoint);
@@ -524,6 +550,36 @@ namespace Recorded.Weapons
 
             PlayShotAnimation();
             return true;
+        }
+
+        private void NotifyShotFired(Vector3 origin, Vector3 direction, Ammo.AmmoType ammo, ObjectColorState color)
+        {
+            ShotFired?.Invoke(new SpectrumShotRecord(ammo, color, origin, direction));
+        }
+
+        /// <summary>
+        /// Hitscan from a recorded hologram shot. Does not spend a chamber.
+        /// Skips the player and the hologram so the echo can paint the same target.
+        /// </summary>
+        public void ReplayRecordedShot(Vector3 origin, Vector3 direction, Ammo.AmmoType ammo, ObjectColorState color, Transform ignoreRoot)
+        {
+            if (direction.sqrMagnitude < 0.0001f) return;
+            direction.Normalize();
+            ResolveDependencies();
+            float range = raycastWeapon != null ? raycastWeapon.MaxRange : 100f;
+            int mask = raycastWeapon != null ? raycastWeapon.HitLayers.value : ~0;
+            RaycastHit[] hits = Physics.RaycastAll(origin, direction, range, mask, QueryTriggerInteraction.Ignore);
+            System.Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
+            for (int i = 0; i < hits.Length; i++)
+            {
+                Collider col = hits[i].collider;
+                if (col == null) continue;
+                Transform root = col.transform.root;
+                if (root == transform.root) continue;
+                if (ignoreRoot != null && root == ignoreRoot.root) continue;
+                DeliverColorPayload(hits[i], ammo, color, direction);
+                return;
+            }
         }
 
         /// <summary>
