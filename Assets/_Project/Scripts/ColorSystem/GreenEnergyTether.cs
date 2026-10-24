@@ -2,6 +2,12 @@ using UnityEngine;
 
 namespace Recorded.ColorSystem
 {
+    /// <summary>An enemy or prop that must drop navigation before the green rope reels it in.</summary>
+    public interface ITetherPullReceiver
+    {
+        void ReleaseForPull();
+    }
+
     /// <summary>
     /// Walkable energy bridge between exactly two Green targets.
     /// The LineRenderer is the rope. A kinematic BoxCollider matches that segment every

@@ -225,6 +225,13 @@ namespace Recorded.ColorSystem
                     || (_colorTarget != null && (_colorTarget.CurrentColorState & ObjectColorState.Green) != 0);
                 if (alreadyGreen && _tether != null)
                 {
+                    SpectrumSkillResponder moving = _tether.Other(this);
+                    if (moving != null)
+                    {
+                        ITetherPullReceiver[] receivers = moving.GetComponents<ITetherPullReceiver>();
+                        for (int i = 0; i < receivers.Length; i++)
+                            receivers[i].ReleaseForPull();
+                    }
                     _tether.BeginPullToward(this);
                 }
                 else if (!alreadyGreen)

@@ -47705,7 +47705,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Recorded.Weapons.Ammo.CylinderAmmoController
   autoLoadOnStart: 0
-  chambers: 020000000300000003000000020000000100000003000000
+  chambers: 0200000003000000030000000200000001000000030000000000000000000000
   activeChamberIndex: 0
 --- !u!4 &642195716
 Transform:
@@ -94618,7 +94618,7 @@ Transform:
   m_GameObject: {fileID: 1413042938}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0.435, z: 0}
+  m_LocalPosition: {x: 0, y: 0.542, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
@@ -105886,7 +105886,7 @@ Transform:
   m_GameObject: {fileID: 1578818439}
   serializedVersion: 2
   m_LocalRotation: {x: -0, y: 1, z: -0, w: 0}
-  m_LocalPosition: {x: 0.15, y: 0.22, z: 33.1}
+  m_LocalPosition: {x: 0.15, y: 0.22, z: 36.1}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:

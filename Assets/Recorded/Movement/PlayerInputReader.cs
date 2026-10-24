@@ -28,8 +28,10 @@ namespace Recorded
                     enabled = false;
                     return;
                 }
-                // Each player owns its enabled maps; the shared project asset stays untouched.
-                runtimeActions = Instantiate(inputActions);
+                // Instantiate() leaves cloned maps pointing at the shared asset, so Enable()
+                // asserts "Map must be contained in state". FromJson builds a private copy.
+                runtimeActions = InputActionAsset.FromJson(inputActions.ToJson());
+                runtimeActions.hideFlags = HideFlags.HideAndDontSave;
                 map = runtimeActions.FindActionMap(actionMapName, false);
                 move = map?.FindAction("Move");
                 look = map?.FindAction("Look");

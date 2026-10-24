@@ -527,14 +527,19 @@ namespace Recorded.Weapons
         }
 
         /// <summary>
-        /// Walls block the ray because they are on Default. Color is delivered only when the hit
-        /// collider is on ColorInteractable and exposes IColorTarget.
+        /// Walls on Default still stop the ray. Color is delivered when the hit is on
+        /// ColorInteractable, or when the object already carries a color target. Test props and
+        /// enemies stay on Default so their own AI and physics are left alone.
         /// </summary>
         private void DeliverColorPayload(RaycastHit hitInfo, Ammo.AmmoType firedAmmo, ObjectColorState shotColorState, Vector3 shotDir)
         {
-            if (!ColorInteractable.Is(hitInfo.collider)) return;
+            if (hitInfo.collider == null) return;
 
             IColorShotImpact[] shotImpacts = hitInfo.collider.GetComponentsInParent<IColorShotImpact>();
+            bool hasImpact = shotImpacts != null && shotImpacts.Length > 0;
+            bool hasTarget = hitInfo.collider.GetComponentInParent<IColorTarget>() != null;
+            if (!ColorInteractable.Is(hitInfo.collider) && !hasImpact && !hasTarget) return;
+
             if (shotImpacts != null)
             {
                 for (int i = 0; i < shotImpacts.Length; i++)
