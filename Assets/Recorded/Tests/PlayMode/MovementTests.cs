@@ -344,14 +344,14 @@ namespace Recorded.Tests
                 peakRoll = Mathf.Max(peakRoll, Mathf.Abs(currentRoll));
                 Assert.That(Vector3.Distance(previous, view.localPosition) / dt, Is.LessThan(0.07f), "Bob must not snap.");
                 Assert.That(Mathf.Abs(currentRoll - previousRoll) / dt, Is.LessThan(35f), "Tilt must not snap when reversing.");
-                Assert.That(Mathf.Abs(currentRoll), Is.LessThanOrEqualTo(1.52f));
+                Assert.That(Mathf.Abs(currentRoll), Is.LessThanOrEqualTo(0.72f));
                 Assert.That(view.position.y - player.transform.position.y + 0.03f,
                     Is.LessThan(capsule.height - motor.Settings.SkinWidth));
                 previous = view.localPosition;
                 previousRoll = currentRoll;
             }
-            Assert.That(peakOffset, Is.GreaterThan(0.0007f).And.LessThan(0.009f));
-            Assert.That(peakRoll, Is.GreaterThan(1f));
+            Assert.That(peakOffset, Is.GreaterThan(0.0007f).And.LessThan(0.005f));
+            Assert.That(peakRoll, Is.GreaterThan(0.45f));
             look.ApplyLook(new Vector2(20f, 10f));
             Assert.That(look.Pitch, Is.EqualTo(-1f).Within(0.001f), "Mouse look stays immediate.");
             for (int i = 0; i < fps * 2; i++)
@@ -377,6 +377,135 @@ namespace Recorded.Tests
             }
             Assert.That(view.localPosition.magnitude, Is.LessThan(0.0001f));
             Assert.That(Mathf.Abs(Mathf.DeltaAngle(0f, view.localEulerAngles.z)), Is.LessThan(0.005f));
+        }
+
+        [TestCase(30)]
+        [TestCase(60)]
+        [TestCase(144)]
+        public void WeaponMotion_WalksWithGait_LagsTurns_AndSettlesWithoutMovingTheAim(int fps)
+        {
+            var look = player.GetComponent<FirstPersonLook>();
+            var camera = player.GetComponentInChildren<Camera>();
+            var overlay = new GameObject("Motion overlay", typeof(Camera)).GetComponent<Camera>();
+            overlay.transform.SetParent(camera.transform, false);
+            overlay.enabled = false;
+            var holder = new GameObject("Motion viewmodel");
+            holder.SetActive(false);
+            holder.transform.SetParent(camera.transform, false);
+            var viewmodel = holder.AddComponent<FirstPersonViewmodel>();
+            SetField(viewmodel, "worldCamera", camera);
+            SetField(viewmodel, "viewmodelCamera", overlay);
+            viewmodel.enabled = false;
+            holder.SetActive(true);
+            var updateCamera = typeof(FirstPersonLook).GetMethod("UpdateCameraMotion", BindingFlags.NonPublic | BindingFlags.Instance);
+            var updateWeapon = typeof(FirstPersonViewmodel).GetMethod("UpdateViewmodel", BindingFlags.NonPublic | BindingFlags.Instance);
+            float dt = 1f / fps, peak = 0f;
+            Vector3 previous = holder.transform.localPosition;
+            void Step(MovementInput command)
+            {
+                motor.Simulate(command, dt);
+                updateCamera.Invoke(look, new object[] { dt });
+                updateWeapon.Invoke(viewmodel, new object[] { dt });
+            }
+            for (int i = 0; i < fps * 2; i++)
+            {
+                Step(new MovementInput(i < fps ? Vector2.right : Vector2.left));
+                var position = holder.transform.localPosition;
+                peak = Mathf.Max(peak, position.magnitude);
+                Assert.That(Vector3.Distance(previous, position) / dt, Is.LessThan(0.3f), "Start, steps and direction changes must ease.");
+                Assert.That(Quaternion.Angle(Quaternion.identity, holder.transform.localRotation), Is.LessThan(4f));
+                previous = position;
+            }
+            Assert.That(peak, Is.GreaterThan(0.005f).And.LessThan(0.035f), "Weapon moves even when camera bob is disabled.");
+            Assert.That(camera.transform.localPosition.magnitude, Is.LessThan(0.0001f));
+            Assert.That(look.Pitch, Is.Zero);
+            for (int i = 0; i < fps; i++) Step(default);
+            for (int i = 0; i < fps / 2; i++)
+            {
+                look.ApplyLook(new Vector2(900f * dt, 0f));
+                Step(default);
+            }
+            Assert.That(Mathf.DeltaAngle(0f, holder.transform.localEulerAngles.y), Is.LessThan(-0.3f), "Weapon should trail a turn.");
+            var paused = holder.transform.localPosition;
+            updateWeapon.Invoke(viewmodel, new object[] { 0f });
+            Assert.That(holder.transform.localPosition, Is.EqualTo(paused));
+            for (int i = 0; i < fps * 2; i++) Step(default);
+            Assert.That(holder.transform.localPosition.magnitude, Is.LessThan(0.004f), "Walking should settle into gentle idle breathing.");
+            Assert.That(Quaternion.Angle(Quaternion.identity, holder.transform.localRotation), Is.LessThan(0.3f));
+            motor.ApplyImpulse(Vector3.right * 8f);
+            for (int i = 0; i < fps / 2; i++) Step(default);
+            Assert.That(holder.transform.localPosition.magnitude, Is.LessThan(0.004f), "Knockback alone must not create walking-sized motion.");
+            viewmodel.enabled = true;
+            viewmodel.enabled = false;
+            Assert.That(holder.transform.localPosition, Is.EqualTo(Vector3.zero));
+        }
+
+        [TestCase(30)]
+        [TestCase(60)]
+        [TestCase(144)]
+        public void WeaponMotion_IdleBreathes_JumpLags_LandingRecovers_WithoutMovingCamera(int fps)
+        {
+            var look = player.GetComponent<FirstPersonLook>();
+            var camera = player.GetComponentInChildren<Camera>();
+            var overlay = new GameObject("Airborne overlay", typeof(Camera)).GetComponent<Camera>();
+            overlay.transform.SetParent(camera.transform, false);
+            overlay.enabled = false;
+            var holder = new GameObject("Idle and airborne viewmodel");
+            holder.SetActive(false);
+            holder.transform.SetParent(camera.transform, false);
+            var viewmodel = holder.AddComponent<FirstPersonViewmodel>();
+            SetField(viewmodel, "worldCamera", camera);
+            SetField(viewmodel, "viewmodelCamera", overlay);
+            viewmodel.enabled = false;
+            holder.SetActive(true);
+            var updateCamera = typeof(FirstPersonLook).GetMethod("UpdateCameraMotion", BindingFlags.NonPublic | BindingFlags.Instance);
+            var updateWeapon = typeof(FirstPersonViewmodel).GetMethod("UpdateViewmodel", BindingFlags.NonPublic | BindingFlags.Instance);
+            float dt = 1f / fps, idlePeak = 0f, riseDip = 0f, fallLift = 0f, landingDip = 0f;
+            Vector3 previous = holder.transform.localPosition;
+            void Step(MovementInput command)
+            {
+                motor.Simulate(command, dt);
+                updateCamera.Invoke(look, new object[] { dt });
+                updateWeapon.Invoke(viewmodel, new object[] { dt });
+                var position = holder.transform.localPosition;
+                Assert.That(Vector3.Distance(previous, position) / dt, Is.LessThan(0.65f), "Idle, takeoff and landing must not snap.");
+                Assert.That(position.magnitude, Is.LessThan(0.045f));
+                Assert.That(Quaternion.Angle(Quaternion.identity, holder.transform.localRotation), Is.LessThan(4f));
+                previous = position;
+            }
+            for (int i = 0; i < fps * 2; i++)
+            {
+                Step(default);
+                idlePeak = Mathf.Max(idlePeak, Mathf.Abs(holder.transform.localPosition.y));
+            }
+            Assert.That(idlePeak, Is.GreaterThan(0.001f).And.LessThan(0.004f));
+            Step(new MovementInput(Vector2.zero, jumpPressed: true));
+            Assert.That(motor.IsGrounded, Is.False);
+            var paused = holder.transform.localPosition;
+            updateWeapon.Invoke(viewmodel, new object[] { 0f });
+            Assert.That(holder.transform.localPosition, Is.EqualTo(paused));
+            for (int i = 0; i < fps * 3 && !motor.IsGrounded; i++)
+            {
+                Step(default);
+                if (motor.Velocity.y > 0f) riseDip = Mathf.Min(riseDip, holder.transform.localPosition.y);
+                else if (!motor.IsGrounded) fallLift = Mathf.Max(fallLift, holder.transform.localPosition.y);
+            }
+            Assert.That(motor.IsGrounded, Is.True);
+            Assert.That(riseDip, Is.LessThan(-0.005f), "Takeoff must give the weapon upward-motion lag.");
+            Assert.That(fallLift, Is.GreaterThan(0.003f), "Weapon should lift relative to the camera while falling.");
+            for (int i = 0; i < fps; i++)
+            {
+                Step(default);
+                landingDip = Mathf.Min(landingDip, holder.transform.localPosition.y);
+            }
+            Assert.That(landingDip, Is.LessThan(-0.001f), "Landing must compress and recover.");
+            Assert.That(holder.transform.localPosition.magnitude, Is.LessThan(0.004f));
+            Assert.That(camera.transform.localPosition.magnitude, Is.LessThan(0.0001f));
+            Assert.That(look.Pitch, Is.Zero);
+            viewmodel.enabled = true;
+            viewmodel.enabled = false;
+            Assert.That(holder.transform.localPosition, Is.EqualTo(Vector3.zero));
+            Assert.That(Quaternion.Angle(holder.transform.localRotation, Quaternion.identity), Is.LessThan(0.001f));
         }
 
         [Test]

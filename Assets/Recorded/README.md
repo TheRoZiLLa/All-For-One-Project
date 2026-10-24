@@ -68,8 +68,8 @@ Select Player > FirstPersonMotor > Settings. Values are local to each prefab ins
 | Mouse sensitivity / pitch limit | 0.1 degrees per pixel / ±85° |
 | Camera FOV / near clip | 75° / 0.03 m |
 | Stair camera smoothing | 0.08 s |
-| Bob amount / cadence | 0.006 m / 1.6 Hz at walk speed |
-| Maximum strafe tilt / motion smoothing | 1.5° / 0.14 s |
+| Bob amount / cadence | 0.0035 m / 1.6 Hz at walk speed |
+| Maximum strafe tilt / motion smoothing | 0.7° / 0.10 s |
 | Motion blur intensity / clamp | 0.12 / 0.025 |
 
 Increase acceleration for faster turns; increase deceleration for faster stops.
@@ -101,6 +101,17 @@ This keeps hands visible against nearby walls. Hands do not cast/receive shadows
 post-processing, shadows, depth/color texture requests and automatic Volume updates.
 At `MainCamera > Viewmodel > FirstPersonViewmodel`, wall detection starts at 0.8 m and smoothly
 pulls back up to 0.08 m / lowers the gun by 10 degrees, with a 0.08 s response. It ignores player colliders.
+The same holder adds 0.012 m walking sway, a small movement lean and up to 1.5 degrees of turn lag,
+smoothed over 0.10 s. Weapon steps share the camera gait phase even when camera bob is disabled.
+Motion fades on stopping or going airborne, halves while crouched, and follows actual travel so pushing
+against a wall or knockback alone cannot create footsteps. The near-wall pose keeps priority; gait and
+turn sway drop to 20% during Reload. Both arms and ReloadPickup share this transform, preserving grip.
+At rest the holder breathes at 0.22 Hz with a 0.0025 m amplitude. Walking fades this out; crouching reduces it.
+Jumping adds up to 0.022 m of vertical inertia: the weapon trails takeoff, lifts during descent, then dips
+and lightly rebounds on landing. Landing strength follows the last downward speed and stays capped for
+long falls. Airborne/idle motion uses the same smoothing, reload reduction and wall priority as walking;
+it moves both arms together without changing the camera's aim. Idle Amount and Jump Amount are adjustable
+on FirstPersonViewmodel. Pauses freeze the motion; disabling it restores the authored pose.
 This is a visual viewmodel effect. The saved prefab now has the Spectrum weapon system on the held REV;
 its raycasts check world geometry between the camera, muzzle and target. See
 `Assets/_Project/README_SPECTRUM_GUN.md` for ammo, effects and verification details.
