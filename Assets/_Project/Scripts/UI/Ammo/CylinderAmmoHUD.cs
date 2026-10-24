@@ -53,6 +53,7 @@ namespace Recorded.Weapons.Ammo
         private RectTransform _innerCylinderRect;
         private Image _activeBracketRingImage;
         private Image _activeChevronImage;
+        private float _indicatorPulse;
 
         public RectTransform InnerCylinderRect => _innerCylinderRect;
 
@@ -92,6 +93,16 @@ namespace Recorded.Weapons.Ammo
             ResolveControllers();
             BuildHUDHierarchy();
             RefreshAllChambers();
+        }
+
+        private void Update()
+        {
+            // A restrained unscaled pulse improves scanability without moving the fixed 12 o'clock marker.
+            if (_activeBracketRingImage == null) return;
+            _indicatorPulse = Mathf.Lerp(_indicatorPulse, 0f, Time.unscaledDeltaTime * 7f);
+            float breathe = 1f + Mathf.Sin(Time.unscaledTime * 4.5f) * 0.035f + _indicatorPulse * 0.10f;
+            _activeBracketRingImage.rectTransform.localScale = Vector3.one * breathe;
+            if (_activeChevronImage != null) _activeChevronImage.rectTransform.localScale = Vector3.one * (1f + _indicatorPulse * 0.08f);
         }
 
         private void ResolveControllers()
@@ -467,6 +478,7 @@ namespace Recorded.Weapons.Ammo
 
         private void HandleActiveChamberChanged(int activeIndex)
         {
+            _indicatorPulse = 1f;
             UpdateActiveIndicatorTint();
         }
 

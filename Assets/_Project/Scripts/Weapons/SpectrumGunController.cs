@@ -358,6 +358,8 @@ namespace Recorded.Weapons
 
             ResolveDependencies();
 
+            if (raycastWeapon == null) return false;
+
             if (rotationController != null && rotationController.IsRotating)
             {
                 return false; // Prevent firing while cylinder is actively rotating
@@ -465,8 +467,6 @@ namespace Recorded.Weapons
             // Fallback for standalone gun testing without cylinder
             _nextFireTime = Time.time + (1f / fireRate);
             TriggerRecoilImpulse(1.0f);
-
-            if (raycastWeapon == null) return false;
 
             ObjectColorState fallbackState = ObjectColorState.None;
             switch (currentMode)

@@ -677,7 +677,7 @@ namespace Recorded.ColorSystem
         {
             // RED Kinetic Chain Impact: transfer explosive knockback when a Red-launched object slams into another physics prop
             if (_redChainTimer <= 0f || collision.rigidbody == null || collision.rigidbody.isKinematic) return;
-            if (collision.rigidbody.CompareTag("Player")) return;
+            if (collision.rigidbody.CompareTag("Player") || collision.rigidbody.GetComponentInParent<Recorded.FirstPersonMotor>() != null) return;
 
             Vector3 transferDir = (collision.rigidbody.worldCenterOfMass - transform.position).normalized + (Vector3.up * 0.3f);
             Vector3 chainImpulse = transferDir.normalized * (_lastRedImpulseApplied.magnitude * redChainTransferMultiplier);

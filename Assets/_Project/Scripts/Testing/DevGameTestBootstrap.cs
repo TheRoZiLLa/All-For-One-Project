@@ -86,7 +86,17 @@ namespace Recorded.Testing
             Camera cam = SetupPlayerAndCamera();
             SetupCylinderAmmoHUD();
             SetupSpectrumGun(cam);
+            EnsureCrosshairPresentation();
             SetupTestTargets();
+        }
+
+        private static void EnsureCrosshairPresentation()
+        {
+            CrosshairUI crosshair = FindFirstObjectByType<CrosshairUI>();
+            if (crosshair != null && crosshair.GetComponent<CrosshairSettingsUI>() == null)
+            {
+                crosshair.gameObject.AddComponent<CrosshairSettingsUI>();
+            }
         }
 
         private void SetupLightingAndFloor()
@@ -291,6 +301,7 @@ namespace Recorded.Testing
                 GameObject crosshairObj = new GameObject("CrosshairUI_Manager");
                 crosshairObj.transform.SetParent(gunRoot.transform, false);
                 crosshairObj.AddComponent<CrosshairUI>();
+                crosshairObj.AddComponent<CrosshairSettingsUI>();
             }
 
             controller.SetColorMode(SpectrumColorMode.Red);
