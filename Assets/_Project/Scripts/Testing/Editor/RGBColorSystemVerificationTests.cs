@@ -11,7 +11,7 @@ namespace Recorded.Testing.Editor
     /// Automated Editor verification suite for the RECORDED Spectrum Gun Overhaul:
     /// - 8-state RGB additive color mixing & independent 5-second timers
     /// - 12 o'clock Cylinder Ammo HUD, real revolver rotation sync, and dry-fire rules
-    /// - Real physical weapon skills (RED Impulse, GREEN Bind SpringJoint & independent timer, CYAN Stasis & independent timer)
+    /// - Real physical weapon skills (RED Impulse, GREEN tether between two Green objects, BLUE full stasis)
     /// - Exact barrel-tip MuzzlePoint resolution and close-range viewmodel placement
     /// - ColorPuzzleCondition integration
     /// </summary>
@@ -253,33 +253,142 @@ namespace Recorded.Testing.Editor
                 bool pass23 = (skillResp.RedImpulseHitCount >= 1) && (skillResp.LastRedImpulseApplied.sqrMagnitude > 1f);
                 LogCase(23, "SpectrumSkillResponder applies RED Impulse on hit while preserving duplicate timer rule", pass23, ref passedCount, results);
 
-                // Case 24: SpectrumSkillResponder GREEN Bind & CYAN (Blue) Stasis state transitions and physics restoration
+                // Case 24: Green alone does not tether. Blue fully stops the body and reset restores the snapshot.
                 rb.linearVelocity = Vector3.forward * 10f;
                 secondTarget.ApplyColor(ObjectColorState.Green);
                 secondTarget.ApplyColor(ObjectColorState.Blue);
-                bool statesActive = skillResp.IsGreenBound && skillResp.IsBlueStasis && !rb.useGravity;
+                bool frozen = skillResp.IsBlueStasis && rb.isKinematic && !rb.useGravity
+                    && rb.constraints == RigidbodyConstraints.FreezeAll
+                    && rb.linearVelocity.sqrMagnitude < 0.0001f;
+                bool statesActive = skillResp.IsGreenBound && !skillResp.IsTethered && frozen;
                 secondTarget.ResetColors();
-                bool statesRestored = !skillResp.IsGreenBound && !skillResp.IsBlueStasis && rb.useGravity;
+                bool statesRestored = !skillResp.IsGreenBound && !skillResp.IsBlueStasis && rb.useGravity && !rb.isKinematic
+                    && (rb.linearVelocity - (Vector3.forward * 10f)).sqrMagnitude < 0.01f;
                 bool pass24 = statesActive && statesRestored;
-                LogCase(24, "SpectrumSkillResponder activates GREEN Bind & CYAN Stasis and restores physics on reset", pass24, ref passedCount, results);
+                LogCase(24, "Green waits for a partner, Blue fully stops the body, and reset restores gravity plus the frozen velocity", pass24, ref passedCount, results);
 
-                // Case 25: GREEN Bind creates real SpringJoint without duplicating joints on repeated hits and cleans up on expire
-                skillResp.OnColorShotHit(AmmoType.Green, ObjectColorState.Green, dummyHit, Vector3.forward);
-                skillResp.OnColorShotHit(AmmoType.Green, ObjectColorState.Green, dummyHit, Vector3.forward);
-                SpringJoint[] jointsDuringBind = secondObj.GetComponents<SpringJoint>();
-                bool singleJointCreated = (jointsDuringBind.Length == 1) && (skillResp.ActiveBindJoint != null);
-                skillResp.TickSkillTimers(10.0f); // Advance past independent bindDuration
-                SpringJoint[] jointsAfterExpire = secondObj.GetComponents<SpringJoint>();
-                bool pass25 = singleJointCreated && (!skillResp.IsGreenBound) && (jointsAfterExpire.Length == 0);
-                LogCase(25, "GREEN Bind creates a single SpringJoint tether (no duplicates on re-hit) and cleans up on timer expire", pass25, ref passedCount, results);
+                // Case 25: Green rope exists only between two Green objects, can be walked as a bridge, and re-shoots reel the other end.
+                GameObject grey = null;
+                GameObject far = null;
+                GameObject partnerObj = null;
+                try
+                {
+                    grey = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                    grey.name = "Test_GreyUnpainted";
+                    grey.transform.position = secondObj.transform.position + new Vector3(1.2f, 0f, 0f);
+                    Rigidbody greyRb = grey.AddComponent<Rigidbody>();
+                    greyRb.useGravity = false;
+                    greyRb.linearVelocity = Vector3.zero;
 
-                // Case 26: CYAN Stasis runs on its own independent skill timer and cleanly restores gravity/damping when expired
+                    skillResp.OnColorShotHit(AmmoType.Green, ObjectColorState.Green, dummyHit, Vector3.forward);
+                    skillResp.OnColorShotHit(AmmoType.Green, ObjectColorState.Green, dummyHit, Vector3.forward);
+                    bool noGreyMagnet = skillResp.IsGreenBound && !skillResp.IsTethered
+                        && greyRb.linearVelocity.sqrMagnitude < 0.0001f
+                        && secondObj.GetComponents<SpringJoint>().Length == 0;
+
+                    far = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                    far.name = "Test_GreenFar";
+                    far.transform.position = secondObj.transform.position + new Vector3(0f, 0f, 30f);
+                    SpectrumSkillResponder farSkill = far.AddComponent<SpectrumSkillResponder>();
+                    farSkill.EnsureInitialized();
+                    farSkill.OnColorShotHit(AmmoType.Green, ObjectColorState.Green, dummyHit, Vector3.forward);
+                    bool outOfRange = !skillResp.IsTethered && !farSkill.IsTethered;
+
+                    partnerObj = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                    partnerObj.name = "Test_GreenPartner";
+                    partnerObj.transform.position = secondObj.transform.position + new Vector3(0f, 0f, 6f);
+                    Rigidbody partnerRb = partnerObj.AddComponent<Rigidbody>();
+                    partnerRb.useGravity = false;
+                    SpectrumSkillResponder partnerSkill = partnerObj.AddComponent<SpectrumSkillResponder>();
+                    partnerSkill.EnsureInitialized();
+                    partnerSkill.OnColorShotHit(AmmoType.Green, ObjectColorState.Green, dummyHit, Vector3.forward);
+
+                    GreenEnergyTether tether = skillResp.ActiveTether;
+                    bool linkedPair = tether != null && tether == partnerSkill.ActiveTether && !farSkill.IsTethered
+                        && tether.Other(skillResp) == partnerSkill
+                        && !tether.IsPulling
+                        && partnerObj.GetComponents<SpringJoint>().Length == 0;
+
+                    bool bridgeMatches = false;
+                    bool bridgeFollows = false;
+                    bool reeledPartner = false;
+                    bool reversed = false;
+                    if (tether != null)
+                    {
+                        tether.RefreshBridge();
+                        BoxCollider bridge = tether.BridgeCollider;
+                        LineRenderer rope = tether.Rope;
+                        Vector3 endA = tether.EndpointA.TetherPoint;
+                        Vector3 endB = tether.EndpointB.TetherPoint;
+                        float span = Vector3.Distance(endA, endB);
+                        Vector3 spanDir = (endB - endA).normalized;
+                        bridgeMatches = bridge != null && !bridge.isTrigger && rope != null
+                            && tether.GetComponent<Rigidbody>() != null && tether.GetComponent<Rigidbody>().isKinematic
+                            && Vector3.Distance(tether.transform.position, (endA + endB) * 0.5f) < 0.02f
+                            && Mathf.Abs(bridge.size.z - span) < 0.02f
+                            && Vector3.Angle(tether.transform.forward, spanDir) < 1f
+                            && Vector3.Distance(rope.GetPosition(0), endA) < 0.02f
+                            && Vector3.Distance(rope.GetPosition(1), endB) < 0.02f;
+
+                        partnerObj.transform.position += Vector3.right * 3f;
+                        tether.RefreshBridge();
+                        Vector3 movedA = tether.EndpointA.TetherPoint;
+                        Vector3 movedB = tether.EndpointB.TetherPoint;
+                        float movedSpan = Vector3.Distance(movedA, movedB);
+                        bridgeFollows = Mathf.Abs(bridge.size.z - movedSpan) < 0.02f
+                            && Mathf.Abs(movedSpan - span) > 0.5f
+                            && Vector3.Distance(tether.transform.position, (movedA + movedB) * 0.5f) < 0.02f
+                            && Vector3.Angle(tether.transform.forward, (movedB - movedA).normalized) < 1f;
+
+                        Vector3 anchorBefore = secondObj.transform.position;
+                        float distanceBeforePull = Vector3.Distance(partnerSkill.TetherPoint, skillResp.TetherPoint);
+                        skillResp.OnColorShotHit(AmmoType.Green, ObjectColorState.Green, dummyHit, Vector3.forward);
+                        bool pullArmed = tether.IsPulling && tether.PullAnchor == skillResp
+                            && skillResp.ActiveTether == tether && partnerSkill.ActiveTether == tether;
+                        tether.TickPull(0.15f);
+                        float distanceAfterPull = Vector3.Distance(partnerSkill.TetherPoint, skillResp.TetherPoint);
+                        reeledPartner = pullArmed
+                            && distanceAfterPull < distanceBeforePull - 1f
+                            && Vector3.Distance(secondObj.transform.position, anchorBefore) < 0.001f;
+
+                        partnerSkill.OnColorShotHit(AmmoType.Green, ObjectColorState.Green, dummyHit, Vector3.forward);
+                        reversed = tether.IsPulling && tether.PullAnchor == partnerSkill && skillResp.ActiveTether == tether;
+                    }
+
+                    skillResp.TickSkillTimers(10f);
+                    partnerSkill.TickSkillTimers(10f);
+                    bool cleanedUp = !skillResp.IsGreenBound && !partnerSkill.IsGreenBound
+                        && skillResp.ActiveTether == null && partnerSkill.ActiveTether == null
+                        && secondObj.GetComponents<SpringJoint>().Length == 0;
+
+                    bool pass25 = noGreyMagnet && outOfRange && linkedPair && bridgeMatches && bridgeFollows && reeledPartner && reversed && cleanedUp;
+                    LogCase(25, "GREEN tether links only two in-range Green objects, follows them with a walkable box, and a re-shot reels the other end", pass25, ref passedCount, results);
+                }
+                finally
+                {
+                    if (grey != null) Object.DestroyImmediate(grey);
+                    if (far != null) Object.DestroyImmediate(far);
+                    if (partnerObj != null) Object.DestroyImmediate(partnerObj);
+                }
+
+                // Case 26: Blue is a full stop. A second Blue hit does not refresh it, and expiry restores the snapshot.
+                rb.linearVelocity = Vector3.right * 4f;
+                rb.angularVelocity = Vector3.up * 2f;
                 skillResp.OnColorShotHit(AmmoType.Cyan, ObjectColorState.Blue, dummyHit, Vector3.forward);
-                bool stasisStarted = skillResp.IsBlueStasis && (!rb.useGravity);
-                skillResp.TickSkillTimers(10.0f);
-                bool stasisExpiredCleanly = (!skillResp.IsBlueStasis) && rb.useGravity;
-                bool pass26 = stasisStarted && stasisExpiredCleanly;
-                LogCase(26, "CYAN Stasis arrests motion with independent timer and restores original Rigidbody gravity/damping on expire", pass26, ref passedCount, results);
+                bool stasisStarted = skillResp.IsBlueStasis && rb.isKinematic && !rb.useGravity
+                    && rb.constraints == RigidbodyConstraints.FreezeAll
+                    && rb.linearVelocity.sqrMagnitude < 0.0001f
+                    && rb.angularVelocity.sqrMagnitude < 0.0001f;
+                skillResp.OnColorShotHit(AmmoType.Cyan, ObjectColorState.Blue, dummyHit, Vector3.forward);
+                skillResp.TickSkillTimers(3f);
+                bool duplicateDidNotRefresh = skillResp.IsBlueStasis && rb.isKinematic;
+                skillResp.TickSkillTimers(2.2f);
+                bool stasisExpiredCleanly = !skillResp.IsBlueStasis && !rb.isKinematic && rb.useGravity
+                    && rb.constraints == RigidbodyConstraints.None
+                    && (rb.linearVelocity - (Vector3.right * 4f)).sqrMagnitude < 0.01f
+                    && (rb.angularVelocity - (Vector3.up * 2f)).sqrMagnitude < 0.01f;
+                bool pass26 = stasisStarted && duplicateDidNotRefresh && stasisExpiredCleanly;
+                LogCase(26, "BLUE stasis zeros velocity, holds the body kinematic, ignores a duplicate hit, and restores the snapshot", pass26, ref passedCount, results);
 
                 // Case 27: RaycastWeapon auto-resolves MuzzlePoint child so shots never originate from under the gun grip
                 Transform resolvedMuzzle = raycastWep.MuzzlePoint;
