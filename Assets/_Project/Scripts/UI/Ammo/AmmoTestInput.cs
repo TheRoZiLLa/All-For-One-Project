@@ -117,7 +117,7 @@ namespace Recorded.Weapons.Ammo
                     return;
                 }
                 ammoController.TestReloadRandom();
-                Debug.Log("<color=#FFE84D><b>[AmmoTestInput]</b> Test Reload (R): Filled all 6 chambers with randomized RED, GREEN, CYAN distribution.</color>");
+                Debug.Log("<color=#FFE84D><b>[AmmoTestInput]</b> Test Reload (R): Filled all 8 chambers with randomized RED, GREEN, CYAN distribution.</color>");
             }
         }
 

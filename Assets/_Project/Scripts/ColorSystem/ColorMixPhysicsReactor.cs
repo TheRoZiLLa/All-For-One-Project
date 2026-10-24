@@ -194,7 +194,7 @@ namespace Recorded.ColorSystem
                 && _colorTarget.ConsumeCyanStasisOverride())
             {
                 EndCyanZeroG(restorePhysics: false);
-                if (_rb != null)
+                if (_rb != null && !_rb.isKinematic)
                 {
                     _rb.linearVelocity = Vector3.zero;
                     _rb.angularVelocity = Vector3.zero;

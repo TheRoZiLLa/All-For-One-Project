@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using UnityEngine;
 
@@ -16,13 +16,13 @@ namespace Recorded.Weapons.Ammo
         [SerializeField] private RectTransform rotatingInnerCylinder;
 
         [Header("Animation Settings")]
-        [Tooltip("Duration in seconds for a 60-degree chamber rotation.")]
-        [SerializeField] private float rotationDuration = 0.11f;
+        [Tooltip("Duration in seconds for a 45-degree chamber rotation.")]
+        [SerializeField] private float rotationDuration = 0.16f;
 
         [Tooltip("Curve for mechanical snap easing.")]
         [SerializeField] private AnimationCurve rotationCurve = AnimationCurve.EaseInOut(0, 0, 1, 1);
 
-        public const float ChamberAngleStep = 60f; // 360 / 6 = 60 degrees
+        public const float ChamberAngleStep = 360f / CylinderAmmoController.CylinderCapacity;
 
         private float _currentAngle = 0f;
         private float _targetAngle = 0f;
@@ -79,21 +79,21 @@ namespace Recorded.Weapons.Ammo
         }
 
         /// <summary>
-        /// Rotate cylinder counter-clockwise from the shooter's rear view (Q key / Scroll Up), matching real revolver rotation.
-        /// Moves the top (12 o'clock) chamber to the left (10 o'clock) and brings the upper-right chamber (2 o'clock, +1 index) into the 12 o'clock firing indicator.
+        /// <summary>
+        /// Rotate cylinder to the left (Q key): brings the left chamber (10 o'clock, -1 index) into 12 o'clock.
         /// </summary>
         public void RotateLeft()
         {
-            RotateChamberStep(1);
+            RotateChamberStep(-1);
         }
 
         /// <summary>
-        /// Rotate cylinder clockwise from the shooter's rear view (E key / Scroll Down).
-        /// Moves the top (12 o'clock) chamber to the right (2 o'clock) and brings the upper-left chamber (10 o'clock, -1 index) into the 12 o'clock firing indicator.
+        /// <summary>
+        /// Rotate cylinder to the right (E key): brings the right chamber (2 o'clock, +1 index) into 12 o'clock.
         /// </summary>
         public void RotateRight()
         {
-            RotateChamberStep(-1);
+            RotateChamberStep(1);
         }
 
         /// <summary>
@@ -115,7 +115,7 @@ namespace Recorded.Weapons.Ammo
             // Update logical active chamber immediately so rapid inputs or tests never desync
             ammoController.SetActiveChamber(nextActive);
 
-            // Target visual angle: each index change shifts the cylinder by 60 degrees
+            // Target visual angle: each index change shifts the cylinder by 45 degrees
             _targetAngle += (indexDelta * ChamberAngleStep);
 
             if (!Application.isPlaying || !isActiveAndEnabled || rotationDuration <= 0.001f)
@@ -150,9 +150,7 @@ namespace Recorded.Weapons.Ammo
                 float t = Mathf.Clamp01(elapsed / rotationDuration);
                 float curveT = rotationCurve != null ? rotationCurve.Evaluate(t) : t;
 
-                // Slight mechanical overshoot & snap for revolver ratchet feel
-                float snapT = curveT + (Mathf.Sin(t * Mathf.PI) * 0.04f);
-                _currentAngle = Mathf.LerpUnclamped(startAngle, _targetAngle, snapT);
+                _currentAngle = Mathf.LerpUnclamped(startAngle, _targetAngle, curveT);
                 ApplyVisualAngle(_currentAngle);
                 yield return null;
             }
@@ -173,6 +171,16 @@ namespace Recorded.Weapons.Ammo
                 _currentAngle %= 360f;
                 _targetAngle = _currentAngle;
             }
+        }
+
+        private void OnDisable()
+        {
+            if (_rotationCoroutine != null) StopCoroutine(_rotationCoroutine);
+            _rotationCoroutine = null;
+            _isRotating = false;
+            _currentAngle = _targetAngle;
+            NormalizeAngles();
+            if (rotatingInnerCylinder != null) ApplyVisualAngle(_currentAngle);
         }
 
         private void ApplyVisualAngle(float zAngle)

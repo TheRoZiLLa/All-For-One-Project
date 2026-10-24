@@ -61,6 +61,66 @@ namespace Recorded.Testing.Editor
             }
         }
 
+        public static System.Collections.IEnumerator VerifyImpactPresentationInPlayMode(Action<string> completed)
+        {
+            if (!Application.isPlaying) throw new InvalidOperationException("Run impact verification in Play Mode.");
+            var fixture = new GameObject("Impact presentation verification");
+            fixture.SetActive(false);
+            fixture.transform.localScale = Vector3.one * 25f;
+            var muzzle = new GameObject("MuzzlePoint", typeof(Light)).transform;
+            muzzle.SetParent(fixture.transform, false);
+            muzzle.localScale = Vector3.one / 25f;
+            var light = muzzle.GetComponent<Light>();
+            light.intensity = 2f;
+            var feedback = fixture.AddComponent<WeaponImpactFeedback>();
+            feedback.SetMuzzleLight(light);
+            SetReference(feedback, "energyMaterial", AssetDatabase.LoadAssetAtPath<Material>("Assets/_Project/Materials/VFX/SpectrumEnergy.mat"));
+            try
+            {
+                fixture.SetActive(true);
+                var flareCollider = muzzle.GetComponentInChildren<Collider>(true);
+                Require(flareCollider == null || !flareCollider.enabled, "Flash must never affect player collisions, including its first frame.");
+                yield return null;
+                var effects = (Transform)typeof(WeaponImpactFeedback).GetField("_worldEffects", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(feedback);
+                var impacts = effects.Cast<Transform>().Where(t => t.name.StartsWith("ImpactEffect_Procedural")).ToArray();
+                Equal(8, impacts.Length);
+                var tracer = effects.Find("WeaponTracer_Line").GetComponent<LineRenderer>();
+                Equal((float)UnityEngine.Rendering.BlendMode.One, tracer.sharedMaterial.GetFloat("_DstBlend"));
+                Equal(0f, tracer.sharedMaterial.GetFloat("_ZWrite"));
+                var materials = (System.Collections.Generic.List<Material>)typeof(WeaponImpactFeedback).GetField("_ownedMaterials", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(feedback);
+                int materialCount = materials.Count;
+                var point = Vector3.forward * 5f;
+                feedback.SetFeedbackColor(SpectrumGunController.ColorRed);
+                feedback.PlayHitFeedback(Vector3.zero, new RaycastHit { point = point, normal = Vector3.back });
+                var active = impacts.Single(t => t.gameObject.activeSelf);
+                Require(active.GetComponent<LineRenderer>().startColor.a > 0.99f, "Impact must start visible even after a slow frame.");
+                var sparks = active.Find("ImpactSparks").GetComponent<ParticleSystem>();
+                Require(sparks.particleCount > 0 && sparks.main.maxParticles <= 24, "Impact sparks are missing or unbounded.");
+                Equal(ParticleSystemSimulationSpace.World, sparks.main.simulationSpace);
+                Require(active.Find("ImpactCorona") != null && active.Find("ImpactBurstStar") != null);
+                var flare = muzzle.Find("MuzzleFlare_Visual");
+                Equal(18, flare.GetComponent<MeshFilter>().sharedMesh.vertexCount);
+                Require(flare.lossyScale.magnitude < 3f, "Muzzle flash inherited the hand scale.");
+                feedback.SetFeedbackColor(SpectrumGunController.ColorGreen);
+                Require(Vector4.Distance(SpectrumGunController.ColorRed, active.GetComponent<LineRenderer>().sharedMaterial.color) < 0.001f, "Cylinder advancement recolored an active impact.");
+                Equal(SpectrumGunController.ColorRed, light.color);
+                yield return new WaitForSeconds(0.06f);
+                Require(active.GetComponent<LineRenderer>().startColor.a < 1f, "Impact ring did not fade.");
+                yield return new WaitForSeconds(0.6f);
+                Require(impacts.All(t => !t.gameObject.activeSelf), "Impact did not return to the pool.");
+                Require(!tracer.enabled && !light.enabled);
+                Equal(2f, light.intensity);
+                feedback.PlayHitFeedback(Vector3.zero, new RaycastHit { point = point, normal = Vector3.up });
+                Equal(8, effects.Cast<Transform>().Count(t => t.name.StartsWith("ImpactEffect_Procedural")));
+                Equal(materialCount, materials.Count, "Pooled shots allocated more materials.");
+                feedback.enabled = false;
+                Require(impacts.All(t => !t.gameObject.activeSelf && !t.GetComponentInChildren<ParticleSystem>(true).isPlaying), "Disable left impact effects alive.");
+                Require(!tracer.enabled && !light.enabled && !flare.gameObject.activeSelf);
+                completed("PASS: additive crown/dual-ring/sparks, bounded world-space particles, captured shot colors, fading/pool reuse with no new materials, and disable cleanup.");
+            }
+            finally { Object.Destroy(fixture); }
+        }
+
         public static System.Collections.IEnumerator VerifyReloadHudInPlayMode(Action<string> completed)
         {
             if (!Application.isPlaying) throw new InvalidOperationException("Run HUD verification in Play Mode.");
@@ -73,9 +133,20 @@ namespace Recorded.Testing.Editor
             foreach (var behaviour in player.GetComponents<MonoBehaviour>()) behaviour.enabled = false;
             var gun = player.GetComponentInChildren<SpectrumGunController>();
             var animator = player.transform.Find("CameraPivot/MainCamera/Viewmodel/Arms").GetComponent<Animator>();
+            var leftUpper = animator.transform.Find("upper_arm.L");
+            var leftForearm = leftUpper.Find("forearm.L");
+            var leftHand = leftForearm.Find("hand.L");
+            var leftIndex = leftHand.Find("palm.01.L/f_index.01.L/f_index.02.L/f_index.03.L/f_index.03.L_end");
+            var leftThumb = leftHand.Find("palm.01.L/thumb.01.L/thumb.02.L/thumb.03.L/thumb.03.L_end");
+            var leftRestPosition = leftUpper.localPosition;
+            var leftRestRotation = leftHand.localRotation;
+            float upperLength = Vector3.Distance(leftUpper.position, leftForearm.position);
+            float forearmLength = Vector3.Distance(leftForearm.position, leftHand.position);
             var ammo = fixture.AddComponent<CylinderAmmoController>();
             ammo.enabled = false;
-            var rotation = fixture.AddComponent<CylinderRotationController>();
+            var rotationObject = new GameObject("Fixture cylinder rotation");
+            rotationObject.transform.SetParent(fixture.transform, false);
+            var rotation = rotationObject.AddComponent<CylinderRotationController>();
             var hud = fixture.AddComponent<CylinderAmmoHUD>();
             SetReference(gun, "ammoController", ammo);
             SetReference(gun, "rotationController", rotation);
@@ -89,16 +160,37 @@ namespace Recorded.Testing.Editor
             {
                 fixture.SetActive(true);
                 foreach (var canvas in fixture.GetComponentsInChildren<Canvas>()) canvas.enabled = false;
-                yield return null;
-                for (int i = 0; i < 6; i++) ammo.LoadChamber(i, AmmoType.Red);
+                yield return new WaitForEndOfFrame();
+                for (int i = 0; i < CylinderAmmoController.CylinderCapacity; i++) ammo.LoadChamber(i, AmmoType.Red);
                 var inner = hud.InnerCylinderRect;
                 Require(inner != null);
+                var indexedBarrel = gun.transform.Find("Barrel");
+                var cylinderCenter = indexedBarrel.GetComponent<MeshFilter>().sharedMesh.bounds.center;
+                var authoredBarrel = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Recorded/Prefabs/Player.prefab").transform.Find("CameraPivot/MainCamera/Viewmodel/Arms/upper_arm.R/forearm.R/hand.R/REV/Barrel");
+                var seatedCenter = authoredBarrel.localPosition + authoredBarrel.localRotation * cylinderCenter;
+                var seatedRotation = authoredBarrel.localRotation;
+                void CheckModelIndex()
+                {
+                    var expected = seatedRotation * Quaternion.AngleAxis(rotation.CurrentAngle, Vector3.right);
+                    Require(Quaternion.Angle(expected, indexedBarrel.localRotation) < 0.1f, "3D cylinder does not follow the displayed chamber angle: UI=" + rotation.CurrentAngle + ", model=" + indexedBarrel.localEulerAngles + ", rest=" + seatedRotation.eulerAngles);
+                    Require(Vector3.Distance(seatedCenter, indexedBarrel.localPosition + indexedBarrel.localRotation * cylinderCenter) < 0.00001f, "Index rotation moved the cylinder off its seat.");
+                }
+                rotation.RotateChamberStep(2);
+                yield return new WaitUntil(() => !rotation.IsRotating);
+                yield return new WaitForEndOfFrame();
+                CheckModelIndex();
                 Require(gun.TriggerReload());
-                yield return new WaitForSeconds(0.3f);
+                float openingDeadline = Time.realtimeSinceStartup + 5f;
+                while (gun.ReloadProgress < 0.20f && Time.realtimeSinceStartup < openingDeadline) yield return null;
+                Require(gun.ReloadProgress >= 0.20f, "Reload failed to reach ejection.");
                 animator.speed = 0f;
-                yield return null;
+                yield return new WaitForEndOfFrame();
                 Require(inner.anchoredPosition.x < -1f, "HUD cylinder did not swing out with the weapon.");
-                for (int i = 0; i < 6; i++) Require(!inner.Find("Chamber_" + i + "/Cartridge_Base").gameObject.activeSelf, "HUD did not show ejected rounds.");
+                for (int i = 0; i < CylinderAmmoController.CylinderCapacity; i++)
+                {
+                    var ejecting = inner.Find("Chamber_" + i + "/Cartridge_Base");
+                    Require(ejecting.GetComponent<CanvasGroup>().alpha < 0.999f, "HUD did not fade ejected rounds at progress " + gun.ReloadProgress);
+                }
                 var pausedPosition = inner.anchoredPosition;
                 var pausedRotation = inner.localRotation;
                 float pausedProgress = gun.ReloadProgress;
@@ -108,33 +200,131 @@ namespace Recorded.Testing.Editor
                 Equal(pausedPosition, inner.anchoredPosition);
                 Require(Quaternion.Angle(pausedRotation, inner.localRotation) < 0.1f);
                 Require(Mathf.Abs(gun.ReloadProgress - pausedProgress) < 0.0001f);
+                var viewCamera = player.transform.Find("CameraPivot/MainCamera").GetComponent<Camera>();
+                var pickup = viewCamera.transform.Find("Viewmodel/ReloadPickup");
+                var grip = leftHand.Find("ReloadGrip.L");
+                Vector3 beforePickup = Vector3.zero;
+                foreach (float phase in new[] { 0.01f, 0.10f, 0.17f, 0.179f, 0.181f, 0.24f, 0.32f, 0.40f, 0.48f })
+                {
+                    animator.Play("Reload", 0, phase);
+                    animator.Update(0f);
+                    yield return new WaitForEndOfFrame();
+                    var carried = gun.transform.Find("Barrel/Reload_Cartridges");
+                    Require(carried != null && carried.gameObject.activeSelf, "Loader switched on midway through the reach.");
+                    var knob = carried.Find("Speedloader/ReleaseKnob");
+                    Require(Vector3.Distance(knob.position, phase < 0.18f ? pickup.position : grip.position) < 0.002f, "Loader slipped from its pouch/hand anchor.");
+                    if (phase < 0.18f) Require(viewCamera.WorldToViewportPoint(knob.position).y < 0f, "Loader spawned inside the visible frame.");
+                    if (phase == 0.179f) beforePickup = knob.position;
+                    if (phase == 0.181f) Require(Vector3.Distance(beforePickup, knob.position) < 0.005f, "Pickup transfer teleported the loader.");
+                }
+                var loader = gun.transform.Find("Barrel/Reload_Cartridges");
+                Require(loader != null && loader.gameObject.activeSelf, "Reload did not show physical cartridges.");
+                Equal(CylinderAmmoController.CylinderCapacity * 4 + 1, loader.childCount);
+                Require(loader.Find("BulletTip_0") != null && loader.Find("Rim_0") != null, "Cartridges lost their bullet tips or case rims.");
+                Require(loader.Find("Speedloader/LoaderPlate") != null, "Cartridges have no speedloader carrier.");
+                Require(Vector3.Distance((leftIndex.position + leftThumb.position) * 0.5f,
+                    loader.Find("Speedloader/ReleaseKnob").position) < 0.008f, "Left hand missed the speedloader grip.");
+                Require(Vector3.Distance(leftIndex.position, leftThumb.position) < 0.03f, "Fingers did not pinch the release knob.");
+                Require(Mathf.Abs(upperLength - Vector3.Distance(leftUpper.position, leftForearm.position)) < 0.0001f, "Left upper arm stretched.");
+                Require(Mathf.Abs(forearmLength - Vector3.Distance(leftForearm.position, leftHand.position)) < 0.0001f, "Left forearm stretched.");
+                Require(loader.localPosition.x < 0f, "Cartridges did not approach from behind the cylinder.");
+                var cartridge = inner.Find("Chamber_0/Cartridge_Base").GetComponent<RectTransform>();
+                var group = cartridge.GetComponent<CanvasGroup>();
+                Require(group.alpha < 0.001f, "HUD revealed replacement ammo before loading.");
+                Equal(Vector2.zero, cartridge.anchoredPosition, "HUD ammo moved instead of fading.");
+                Equal(Vector3.one, cartridge.localScale, "HUD ammo scaled instead of fading.");
+                Equal(0, refills, "Animation preview filled ammo before cartridges seated.");
+                var insertionPosition = loader.localPosition;
+                var pausedHand = leftHand.position;
+                var insertionOffset = cartridge.anchoredPosition;
+                foreach (var renderer in loader.GetComponentsInChildren<Renderer>()) Equal(gun.gameObject.layer, renderer.gameObject.layer);
+                yield return new WaitForSeconds(0.2f);
+                yield return new WaitForEndOfFrame();
+                Equal(insertionPosition, loader.localPosition);
+                Require(Vector3.Distance(pausedHand, leftHand.position) < 0.00001f, "Paused reload still moved the left hand.");
+                Equal(insertionOffset, cartridge.anchoredPosition);
+                var barrel = gun.transform.Find("Barrel");
+                var insertionRotation = barrel.localRotation;
+                animator.Play("Reload", 0, 0.659f);
+                animator.Update(0f);
+                yield return new WaitForEndOfFrame();
+                var beforeSeat = loader.Find("Cartridge_0").position;
+                Require(Quaternion.Angle(insertionRotation, barrel.localRotation) < 0.05f, "Cylinder spun while cartridges were being inserted.");
+                animator.Play("Reload", 0, 0.661f);
+                animator.Update(0f);
+                yield return new WaitForEndOfFrame();
+                Require(Vector3.Distance(beforeSeat, loader.Find("Cartridge_0").position) < 0.005f, "Cartridges teleported when seating.");
                 animator.speed = 1f;
                 float deadline = Time.time + 5f;
-                while (refills == 0 && Time.time < deadline) yield return null;
+                while (refills == 0 && Time.time < deadline) yield return new WaitForEndOfFrame();
                 Equal(1, refills);
                 Require(gun.ReloadAmmoLoaded && gun.IsReloading);
-                yield return null;
-                for (int i = 0; i < 6; i++) Require(inner.Find("Chamber_" + i + "/Cartridge_Base").gameObject.activeSelf, "HUD did not show inserted rounds.");
-                while (gun.IsReloading && Time.time < deadline) yield return null;
-                yield return null;
+                yield return new WaitForEndOfFrame();
+                for (int i = 0; i < CylinderAmmoController.CylinderCapacity; i++) Require(inner.Find("Chamber_" + i + "/Cartridge_Base").gameObject.activeSelf, "HUD did not show inserted rounds.");
+                while (gun.IsReloading && Time.time < deadline) yield return new WaitForEndOfFrame();
+                yield return new WaitForEndOfFrame();
                 Require(!gun.IsReloading);
                 Require(inner.anchoredPosition.magnitude < 0.001f, "HUD failed to close.");
                 Require(Mathf.Abs(Mathf.DeltaAngle(inner.localEulerAngles.z, rotation.CurrentAngle)) < 0.1f, "Reload spin remained on the logical cylinder index.");
-                for (int i = 0; i < 6; i++) Equal(Vector3.one, inner.Find("Chamber_" + i + "/Cartridge_Base").localScale);
-                rotation.RotateChamberStep(1);
-                yield return new WaitForSeconds(0.2f);
-                Require(Mathf.Abs(Mathf.DeltaAngle(inner.localEulerAngles.z, 60f)) < 0.1f, "Manual rotation desynchronized after reload.");
-                SetCooldown(gun, 0f);
-                Require(gun.AttemptFire());
-                yield return new WaitForSeconds(0.2f);
-                Equal(AmmoType.Empty, ammo.GetChamberAmmo(1));
-                Require(Mathf.Abs(Mathf.DeltaAngle(inner.localEulerAngles.z, 120f)) < 0.1f, "Shot auto-advance desynchronized after reload.");
-                Require(gun.TriggerReload());
+                for (int i = 0; i < CylinderAmmoController.CylinderCapacity; i++) Equal(Vector3.one, inner.Find("Chamber_" + i + "/Cartridge_Base").localScale);
+                Require(!loader.gameObject.activeSelf, "Cartridges stayed visible after closing.");
+                CheckModelIndex();
+                Require(Vector3.Distance(leftRestPosition, leftUpper.localPosition) < 0.00001f, "Left shoulder failed to return.");
+                Require(Quaternion.Angle(leftRestRotation, leftHand.localRotation) < 0.1f, "Left wrist failed to return.");
+                ammo.LoadChamber(0, AmmoType.Red);
                 yield return new WaitForSeconds(0.3f);
+                var cap = inner.Find("Chamber_0/Cartridge_Base/Color_CoreCap").GetComponent<UnityEngine.UI.Image>();
+                var previousColor = cap.color;
+                ammo.LoadChamber(0, AmmoType.Green);
+                Equal(previousColor, cap.color, "Chamber color snapped instead of blending.");
+                Equal(AmmoType.Green, ammo.GetChamberAmmo(0), "Visual transition delayed logical ammo.");
+                yield return new WaitForSeconds(0.3f);
+                Require(Vector4.Distance(cap.color, hud.GetAmmoColor(AmmoType.Green)) < 0.025f, "Chamber color failed to reach its target.");
+                ammo.LoadChamber(0, AmmoType.Empty);
+                Require(group.alpha > 0.99f, "Ammo disappeared instantly instead of fading.");
+                yield return new WaitForSeconds(0.05f);
+                Require(group.alpha > 0f && group.alpha < 0.99f, "Empty ammo skipped its fade.");
+                Equal(Vector2.zero, cartridge.anchoredPosition);
+                Equal(Vector3.one, cartridge.localScale);
+                ammo.LoadChamber(0, AmmoType.Green);
+                yield return new WaitForSeconds(0.3f);
+                rotation.RotateRight();
+                yield return new WaitUntil(() => !rotation.IsRotating);
+                yield return new WaitForEndOfFrame();
+                CheckModelIndex();
+                Require(Mathf.Abs(Mathf.DeltaAngle(inner.localEulerAngles.z, 3f * CylinderRotationController.ChamberAngleStep)) < 0.1f, "Manual rotation desynchronized after reload.");
+                rotation.RotateLeft();
+                yield return new WaitUntil(() => !rotation.IsRotating);
+                yield return new WaitForEndOfFrame();
+                CheckModelIndex();
+                Equal(2, ammo.ActiveChamberIndex);
+                rotation.RotateRight();
+                yield return new WaitUntil(() => !rotation.IsRotating);
+                rotation.RotateRight();
+                rotation.gameObject.SetActive(false);
+                Require(!rotation.IsRotating, "Deactivating the cylinder left firing locked.");
+                Require(Mathf.Abs(Mathf.DeltaAngle(rotation.CurrentAngle, 4f * CylinderRotationController.ChamberAngleStep)) < 0.1f, "Disabled rotation failed to finish the selected index.");
+                rotation.gameObject.SetActive(true);
+                rotation.RotateLeft();
+                yield return new WaitUntil(() => !rotation.IsRotating);
+                yield return new WaitForEndOfFrame();
+                CheckModelIndex();
+                SetCooldown(gun, 0f);
+                Require(gun.AttemptFire(), "Loaded round failed to fire after the rotation completed.");
+                yield return new WaitUntil(() => !rotation.IsRotating);
+                yield return new WaitForEndOfFrame();
+                CheckModelIndex();
+                Equal(AmmoType.Empty, ammo.GetChamberAmmo(3));
+                Require(Mathf.Abs(Mathf.DeltaAngle(inner.localEulerAngles.z, 4f * CylinderRotationController.ChamberAngleStep)) < 0.1f, "Shot auto-advance desynchronized after reload.");
+                Require(gun.TriggerReload());
+                yield return new WaitForSeconds(0.85f);
                 gun.enabled = false;
-                yield return null;
+                yield return new WaitForEndOfFrame();
                 Require(!gun.IsReloading && inner.anchoredPosition.magnitude < 0.001f, "Cancellation left the HUD open.");
-                completed("PASS: HUD follows physical cylinder opening/spin, hides ejected rounds, loads at Animator phase, freezes with paused animation, closes/cancels cleanly and preserves manual/shot indexing.");
+                Require(!loader.gameObject.activeSelf, "Cancellation left physical cartridges floating.");
+                Require(Vector3.Distance(leftRestPosition, leftUpper.localPosition) < 0.00001f, "Cancelled reload left the shoulder displaced.");
+                Require(Quaternion.Angle(leftRestRotation, leftHand.localRotation) < 0.1f, "Cancelled reload left the wrist posed.");
+                completed("PASS: 3D cylinder follows both rotation directions and firing without moving its center; indexed reload keeps hand contact and seating, HUD ammo only fades without sliding/scaling, pauses and cancellation recover.");
             }
             finally
             {
@@ -218,9 +408,9 @@ namespace Recorded.Testing.Editor
                 Require(gun.IsReloading && ammo.HasActiveRound, "Refill did not occur before the closing phase.");
                 while (gun.IsReloading && Time.time < deadline) yield return null;
                 Require(!gun.IsReloading, "Reload never released its firing lock.");
-                for (int i = 0; i < 6; i++) Require(ammo.GetChamberAmmo(i) != AmmoType.Empty);
+                for (int i = 0; i < CylinderAmmoController.CylinderCapacity; i++) Require(ammo.GetChamberAmmo(i) != AmmoType.Empty);
                 input.enabled = false;
-                for (int i = 0; i < 6; i++) ammo.LoadChamber(i, AmmoType.Empty);
+                for (int i = 0; i < CylinderAmmoController.CylinderCapacity; i++) ammo.LoadChamber(i, AmmoType.Empty);
                 PressR(true);
                 Require(gun.IsReloading && refills == 1 && !ammo.HasActiveRound, "Fallback R bypassed the animation.");
                 gun.enabled = false;
@@ -230,10 +420,100 @@ namespace Recorded.Testing.Editor
                 gun.enabled = true;
                 PressR(true);
                 Require(gun.IsReloading && !ammo.HasActiveRound, "Reload could not restart after cancellation.");
+                fixture.SetActive(false);
+                Require(!gun.IsReloading, "Deactivating the player left reload locked.");
                 completed("PASS: actual R keyboard events start Reload on both input routes, delay refill, reject repeated R/fire, and support cancellation/retry.");
             }
             finally
             {
+                Object.Destroy(fixture);
+                UnityEngine.InputSystem.InputSystem.RemoveDevice(keyboard);
+                if (previousKeyboard != null && previousKeyboard.added) previousKeyboard.MakeCurrent();
+                settings.backgroundBehavior = previousBackground;
+                settings.editorInputBehaviorInPlayMode = previousEditorInput;
+            }
+        }
+
+        public static string VerifyKioskInputPriorityInPlayMode()
+        {
+            if (!Application.isPlaying) throw new InvalidOperationException("Run kiosk input verification in Play Mode.");
+            var previousKeyboard = UnityEngine.InputSystem.Keyboard.current;
+            var settings = UnityEngine.InputSystem.InputSystem.settings;
+            var previousBackground = settings.backgroundBehavior;
+            var previousEditorInput = settings.editorInputBehaviorInPlayMode;
+            settings.backgroundBehavior = UnityEngine.InputSystem.InputSettings.BackgroundBehavior.IgnoreFocus;
+            settings.editorInputBehaviorInPlayMode = UnityEngine.InputSystem.InputSettings.EditorInputBehaviorInPlayMode.AllDeviceInputAlwaysGoesToGameView;
+            var keyboard = UnityEngine.InputSystem.InputSystem.AddDevice<UnityEngine.InputSystem.Keyboard>();
+            var fixture = new GameObject("Kiosk input priority verification");
+            fixture.SetActive(false);
+            fixture.transform.position = Vector3.one * 5000f;
+            var player = new GameObject("Player", typeof(CharacterController));
+            player.transform.SetParent(fixture.transform, false);
+            player.tag = "Player";
+            var ammo = player.AddComponent<CylinderAmmoController>();
+            var rotation = player.AddComponent<CylinderRotationController>();
+            rotation.enabled = false;
+            var gun = player.AddComponent<SpectrumGunController>();
+            gun.enabled = false;
+            SetReference(gun, "ammoController", ammo);
+            SetReference(gun, "rotationController", rotation);
+            SetReference(rotation, "ammoController", ammo);
+            var kioskObject = new GameObject("Kiosk", typeof(BoxCollider));
+            kioskObject.transform.SetParent(fixture.transform, false);
+            kioskObject.GetComponent<BoxCollider>().isTrigger = true;
+            var gate = kioskObject.AddComponent<KioskCyanAirlockGate>();
+            var kiosk = kioskObject.AddComponent<SecurityKioskEInteraction>();
+            SetReference(kiosk, "airlockGate", gate);
+            void Invoke(object target, string method, params object[] args) => target.GetType().GetMethod(method, BindingFlags.Instance | BindingFlags.NonPublic).Invoke(target, args);
+            void PressE(bool kioskFirst)
+            {
+                UnityEngine.InputSystem.InputSystem.EnableDevice(keyboard);
+                keyboard.MakeCurrent();
+                UnityEngine.InputSystem.InputSystem.QueueStateEvent(keyboard, new UnityEngine.InputSystem.LowLevel.KeyboardState(UnityEngine.InputSystem.Key.E));
+                UnityEngine.InputSystem.InputSystem.Update();
+                try
+                {
+                    Require(keyboard.eKey.wasPressedThisFrame, "Synthetic E event was not delivered.");
+                    if (kioskFirst) Invoke(kiosk, "Update");
+                    Invoke(gun, "CheckColorSwitchInput");
+                    if (!kioskFirst) Invoke(kiosk, "Update");
+                }
+                finally
+                {
+                    UnityEngine.InputSystem.InputSystem.QueueStateEvent(keyboard, new UnityEngine.InputSystem.LowLevel.KeyboardState());
+                    UnityEngine.InputSystem.InputSystem.Update();
+                }
+            }
+            try
+            {
+                fixture.SetActive(true);
+                PressE(false);
+                Equal(1, ammo.ActiveChamberIndex);
+                Require(!gate.IsKioskUnlocked, "Kiosk unlocked outside its trigger.");
+                var collider = player.GetComponent<CharacterController>();
+                Invoke(kiosk, "OnTriggerEnter", collider);
+                PressE(true);
+                Require(gate.IsKioskUnlocked, "Nearby E failed to unlock the kiosk.");
+                Equal(1, ammo.ActiveChamberIndex, "Kiosk-first input also rotated the gun.");
+                PressE(false);
+                Equal(1, ammo.ActiveChamberIndex, "Gun-first input also rotated the gun.");
+                gate.OnColorShotHit(AmmoType.Red, ObjectColorState.Red, default, Vector3.forward);
+                Require(!gate.IsAirlockOpen, "Non-Cyan shot opened the airlock.");
+                gate.OnColorShotHit(AmmoType.Cyan, ObjectColorState.Green | ObjectColorState.Blue, default, Vector3.forward);
+                Require(gate.IsAirlockOpen, "Cyan shot failed after the kiosk unlocked.");
+                Invoke(kiosk, "OnTriggerExit", collider);
+                PressE(false);
+                Equal(2, ammo.ActiveChamberIndex, "E stayed reserved after leaving the kiosk.");
+                Invoke(kiosk, "OnTriggerEnter", collider);
+                kiosk.enabled = false;
+                Require(!SecurityKioskEInteraction.HasInteractionFor(player.transform), "Disabled kiosk kept E reserved.");
+                PressE(false);
+                Equal(3, ammo.ActiveChamberIndex);
+                return "PASS: E prioritizes the nearby kiosk in either update order, resumes cylinder selection on exit/disable, and preserves Cyan-only gate opening.";
+            }
+            finally
+            {
+                fixture.SetActive(false);
                 Object.Destroy(fixture);
                 UnityEngine.InputSystem.InputSystem.RemoveDevice(keyboard);
                 if (previousKeyboard != null && previousKeyboard.added) previousKeyboard.MakeCurrent();
@@ -258,6 +538,11 @@ namespace Recorded.Testing.Editor
             var animator = player.transform.Find("CameraPivot/MainCamera/Viewmodel/Arms").GetComponent<Animator>();
             var restPosition = source.localPosition;
             var restRotation = source.localRotation;
+            var leftShoulder = animator.transform.Find("upper_arm.L");
+            var leftElbow = leftShoulder.Find("forearm.L");
+            var leftWrist = leftShoulder.Find("forearm.L/hand.L");
+            var shoulderRest = leftShoulder.localPosition;
+            var wristRest = leftWrist.localRotation;
             var meshCenter = barrel.GetComponent<MeshFilter>().sharedMesh.bounds.center;
             var restCenter = restPosition + restRotation * meshCenter;
             var hinge = restCenter + Vector3.down * 0.004f;
@@ -272,6 +557,9 @@ namespace Recorded.Testing.Editor
                     Require(Vector3.Distance(restPosition, barrel.localPosition) * scale < 0.001f, "Ready uses an outdated cylinder seat.");
                     animator.SetTrigger("Reload");
                     var previous = restCenter;
+                    var previousWrist = leftWrist.position;
+                    var previousElbowRotation = leftElbow.localRotation;
+                    var previousWristRotation = leftWrist.localRotation;
                     float maxTravel = 0f;
                     bool enteredReload = false;
                     for (int frame = 0; frame < fps * 3; frame++)
@@ -283,10 +571,18 @@ namespace Recorded.Testing.Editor
                         Require(Mathf.Abs(Vector3.Distance(center, hinge) - 0.004f) * scale < 0.002f, "Cylinder spin moved its center away from the hinge arc.");
                         Require(Vector3.Distance(center, previous) * scale < 0.035f, "Cylinder jumped during reload at " + fps + " FPS.");
                         previous = center;
+                        Require(Vector3.Distance(previousWrist, leftWrist.position) < 0.15f, "Left wrist jumped at " + fps + " FPS.");
+                        Require(Quaternion.Angle(previousElbowRotation, leftElbow.localRotation) < 1100f / fps + 2f, "Left forearm twisted abruptly at " + fps + " FPS.");
+                        Require(Quaternion.Angle(previousWristRotation, leftWrist.localRotation) < 1500f / fps + 2f, "Left wrist twisted abruptly at " + fps + " FPS.");
+                        previousWrist = leftWrist.position;
+                        previousElbowRotation = leftElbow.localRotation;
+                        previousWristRotation = leftWrist.localRotation;
                     }
                     Require(enteredReload, "Reload trigger did not enter the animation.");
                     Require(maxTravel > 0.04f && maxTravel < 0.12f, "Cylinder traveled too far or never opened: " + maxTravel);
                     Require(animator.GetCurrentAnimatorStateInfo(0).IsName("Ready"));
+                    Require(Vector3.Distance(shoulderRest, leftShoulder.localPosition) < 0.00001f, "Ready retained left shoulder movement.");
+                    Require(Quaternion.Angle(wristRest, leftWrist.localRotation) < 0.1f, "Ready retained the left wrist pose.");
                     Require(Vector3.Distance(restPosition, barrel.localPosition) * scale < 0.001f);
                     Require(Quaternion.Angle(restRotation, barrel.localRotation) < 0.1f);
                     animator.Play("Reload", 0, 0.4f);
@@ -296,7 +592,7 @@ namespace Recorded.Testing.Editor
                     Require(Vector3.Distance(restPosition, barrel.localPosition) * scale < 0.001f, "Fire retained an open cylinder pose.");
                     Require(Quaternion.Angle(restRotation, barrel.localRotation) < 0.1f);
                 }
-                return "PASS: reload hinge/center pivot, bounded travel and smooth steps at 30/60/144 FPS; correct prefab seat restored by Ready and Fire.";
+                return "PASS: cylinder and left wrist move smoothly at 30/60/144 FPS; Ready restores the left shoulder/wrist and cylinder seat, Fire restores the cylinder seat.";
             }
             finally
             {
@@ -394,7 +690,7 @@ namespace Recorded.Testing.Editor
             var viewPosition = viewmodel.localPosition;
             var viewRotation = viewmodel.localRotation;
             var cameraRotation = world.transform.localRotation;
-            var lights = gun.GetComponentsInChildren<Light>(true);
+            var lights = gun.GetComponentsInChildren<Light>(true).Where(light => light.transform != raycast.MuzzlePoint).ToArray();
             var intensities = Array.ConvertAll(lights, light => light.intensity);
             var ranges = Array.ConvertAll(lights, light => light.range);
             try
@@ -411,7 +707,7 @@ namespace Recorded.Testing.Editor
                     animator.Rebind();
                     animator.Update(0f);
                     ammo.SetActiveChamber(0);
-                    for (int i = 0; i < 6; i++) ammo.LoadChamber(i, AmmoType.Red);
+                    for (int i = 0; i < CylinderAmmoController.CylinderCapacity; i++) ammo.LoadChamber(i, AmmoType.Red);
                     float step = 1f / fps;
                     int shots = 0;
                     float peakAngle = 0f;
@@ -419,7 +715,7 @@ namespace Recorded.Testing.Editor
                     var previousPosition = raycast.MuzzlePoint.position;
                     for (int frame = 0; frame <= fps * 2; frame++)
                     {
-                        if (shots < 6 && frame * step + 0.0001f >= shots * 0.2f)
+                        if (shots < CylinderAmmoController.CylinderCapacity && frame * step + 0.0001f >= shots * 0.2f)
                         {
                             SetCooldown(gun, 0f);
                             Require(gun.AttemptFire(), "A valid round did not trigger its shot.");
@@ -434,7 +730,7 @@ namespace Recorded.Testing.Editor
                         previousRotation = currentRotation;
                         previousPosition = currentPosition;
                     }
-                    Equal(6, shots);
+                    Equal(CylinderAmmoController.CylinderCapacity, shots);
                     Require(peakAngle > 5f && peakAngle < 12f, "Missing or excessive recoil at " + fps + " FPS: " + peakAngle);
                     Require(Vector3.Distance(muzzlePosition, raycast.MuzzlePoint.position) < 0.001f, "Recovery did not return to the authored grip.");
                     Require(Quaternion.Angle(muzzleRotation, raycast.MuzzlePoint.rotation) < 0.1f);
@@ -465,7 +761,7 @@ namespace Recorded.Testing.Editor
                 animator.Rebind();
                 animator.Update(0f);
                 Require(animator.GetCurrentAnimatorStateInfo(0).IsName("Ready"));
-                return "PASS: six-shot re-trigger/recovery at 30/60/144 FPS, live-shot-only animation, preserved grip/camera/glow, independent wall retraction and Animator reset.";
+                return "PASS: eight-shot re-trigger/recovery at 30/60/144 FPS, live-shot-only animation, preserved grip/camera/glow, independent wall retraction and Animator reset.";
             }
             finally
             {
@@ -525,7 +821,7 @@ namespace Recorded.Testing.Editor
                 Require(!gun.AttemptFire(), "An empty cylinder must not fire.");
                 Require(!flash.enabled);
 
-                var types = new[] { AmmoType.Red, AmmoType.Green, AmmoType.Cyan, AmmoType.Red, AmmoType.Green, AmmoType.Cyan };
+                var types = new[] { AmmoType.Red, AmmoType.Green, AmmoType.Cyan, AmmoType.Red, AmmoType.Green, AmmoType.Cyan, AmmoType.Red, AmmoType.Green };
                 for (int i = 0; i < types.Length; i++) ammo.LoadChamber(i, types[i]);
                 int hits = 0;
                 raycast.OnTargetHit += hit => { Equal(targetObject.GetComponent<Collider>(), hit.collider); hits++; };
@@ -535,7 +831,7 @@ namespace Recorded.Testing.Editor
                     target.ResetColors();
                     Require(gun.AttemptFire());
                     Equal(AmmoType.Empty, ammo.GetChamberAmmo(i));
-                    Equal((i + 1) % 6, ammo.ActiveChamberIndex);
+                    Equal((i + 1) % CylinderAmmoController.CylinderCapacity, ammo.ActiveChamberIndex);
                     var expected = types[i] == AmmoType.Red ? ObjectColorState.Red : types[i] == AmmoType.Green ? ObjectColorState.Green : ObjectColorState.Blue;
                     Equal(expected, target.CurrentColorState);
                     gun.SyncWithActiveChamber();
@@ -543,10 +839,10 @@ namespace Recorded.Testing.Editor
                     Equal(SpectrumGunController.GetAmmoColor(types[i]), flash.color, "A fired flash keeps its color after the cylinder advances.");
                     Require(!gun.AttemptFire(), "Cooldown must prevent a second shot.");
                 }
-                Equal(6, hits);
+                Equal(CylinderAmmoController.CylinderCapacity, hits);
                 SetCooldown(gun, 0f);
                 Require(!gun.AttemptFire());
-                Equal(6, hits);
+                Equal(CylinderAmmoController.CylinderCapacity, hits);
                 Equal(position, rev.localPosition);
                 Equal(rotation, rev.localRotation);
                 Equal(scale, rev.localScale);
@@ -558,7 +854,7 @@ namespace Recorded.Testing.Editor
                 Equal(0, tracer.gameObject.layer);
                 var sheath = effects.Find("WeaponTracer_HelixSheath").GetComponent<LineRenderer>();
                 Require(Vector3.Distance(sheath.transform.lossyScale, Vector3.one) < 0.001f, "Energy sheath inherited hand scale.");
-                Require(Vector4.Distance(SpectrumGunController.GetAmmoColor(AmmoType.Cyan), sheath.sharedMaterial.color) < 0.001f, "Cylinder advance recolored the energy sheath.");
+                Require(Vector4.Distance(SpectrumGunController.GetAmmoColor(types[types.Length - 1]), sheath.sharedMaterial.color) < 0.001f, "Cylinder advance recolored the energy sheath.");
                 var point = tracer.GetPosition(1);
                 var effectPosition = effects.position;
                 player.transform.position += Vector3.right * 3f;
@@ -581,7 +877,37 @@ namespace Recorded.Testing.Editor
                 feedback.enabled = false;
                 Require(!flash.enabled);
                 Require(!tracer.enabled);
-                return "PASS: held grip/idempotent setup, six RGB rounds and auto-advance, cooldown/dry fire, shot colors, world-space effects/cleanup, camera-to-muzzle wall obstruction.";
+
+                Object.DestroyImmediate(wall);
+                wall = null;
+                var body = targetObject.AddComponent<Rigidbody>();
+                var skills = targetObject.AddComponent<SpectrumSkillResponder>();
+                targetObject.AddComponent<ColorMixPhysicsReactor>();
+                target.ResetColors();
+                Physics.SyncTransforms();
+                void FireColor(AmmoType type)
+                {
+                    ammo.LoadChamber(ammo.ActiveChamberIndex, type);
+                    SetCooldown(gun, 0f);
+                    Require(gun.AttemptFire(), "Merged weapon failed to fire a color round.");
+                }
+                FireColor(AmmoType.Green);
+                Require(skills.IsGreenBound && !skills.IsTethered, "Lone Green should wait for a partner.");
+                FireColor(AmmoType.Cyan);
+                Equal(ObjectColorState.Green | ObjectColorState.Blue, target.CurrentColorState);
+                Require(!body.isKinematic && !body.useGravity && !skills.IsBlueStasis, "Green + Blue must enter the new Cyan suspension.");
+                FireColor(AmmoType.Cyan);
+                Equal(ObjectColorState.Blue, target.CurrentColorState);
+                Require(body.isKinematic && skills.IsBlueStasis, "Another Blue shot must stop the suspended object.");
+                target.ResetColors();
+                Require(!body.isKinematic && body.useGravity, "Color reset failed to restore physics.");
+                FireColor(AmmoType.Red);
+                FireColor(AmmoType.Cyan);
+                Equal(ObjectColorState.Red | ObjectColorState.Blue, target.CurrentColorState);
+                FireColor(AmmoType.Green);
+                Equal(ObjectColorState.None, target.CurrentColorState);
+                Require(!body.isKinematic && body.useGravity && body.linearVelocity.sqrMagnitude < 0.0001f, "White mix failed to restore the body.");
+                return "PASS: held grip/idempotent setup, eight RGB rounds, cooldown/dry fire, shot colors, effects/cover checks, and actual weapon shots through origin Cyan suspension, Blue stop, Magenta and White reset.";
             }
             finally
             {

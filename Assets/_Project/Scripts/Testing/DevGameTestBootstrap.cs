@@ -12,7 +12,7 @@ namespace Recorded.Testing
     /// <summary>
     /// Runtime and Editor test harness for Dev GameTest scene.
     /// Ensures that the friend's Player controller, the camera, Sci-Fi Revolver viewmodel,
-    /// 6-chamber Cylinder HUD, crosshair, and RGB physics/puzzle test targets are properly configured.
+    /// 8-chamber Cylinder HUD, crosshair, and RGB physics/puzzle test targets are properly configured.
     /// </summary>
     [DefaultExecutionOrder(-100)]
     public class DevGameTestBootstrap : MonoBehaviour
@@ -345,6 +345,9 @@ namespace Recorded.Testing
                     }
                     responder.EnsureInitialized();
 
+                    if (child.GetComponent<ColorMixPhysicsReactor>() == null)
+                        child.gameObject.AddComponent<ColorMixPhysicsReactor>();
+
                     colorTarget.ResetColors();
                 }
                 return;
@@ -385,6 +388,7 @@ namespace Recorded.Testing
                 RGBColorTarget colorTarget = targetObj.AddComponent<RGBColorTarget>();
                 SpectrumSkillResponder responder = targetObj.AddComponent<SpectrumSkillResponder>();
                 responder.EnsureInitialized();
+                targetObj.AddComponent<ColorMixPhysicsReactor>();
                 colorTarget.ResetColors();
             }
         }

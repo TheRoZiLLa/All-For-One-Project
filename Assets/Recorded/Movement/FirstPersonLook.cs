@@ -15,11 +15,11 @@ namespace Recorded
         [SerializeField, Min(0f)] private float stepSmoothing = 0.08f;
         [Header("Gentle camera motion")]
         [SerializeField] private bool enableBob;
-        [SerializeField, Range(0f, 0.02f)] private float bobAmount = 0.006f;
+        [SerializeField, Range(0f, 0.02f)] private float bobAmount = 0.0035f;
         [SerializeField, Range(0.1f, 4f)] private float bobFrequency = 1.6f;
         [SerializeField] private bool enableTilt;
-        [SerializeField, Range(0f, 5f)] private float strafeTilt = 1.5f;
-        [SerializeField, Min(0.01f)] private float motionSmoothTime = 0.14f;
+        [SerializeField, Range(0f, 5f)] private float strafeTilt = 0.7f;
+        [SerializeField, Min(0.01f)] private float motionSmoothTime = 0.10f;
         private FirstPersonMotor motor;
         private Camera viewCamera;
         private Vector3 viewHome;
@@ -29,6 +29,7 @@ namespace Recorded
         private float previousRootY, stairOffset;
         private bool wasGrounded;
         public float Pitch { get; private set; }
+        public float GaitPhase => bobPhase;
 
         private void Awake()
         {
@@ -104,13 +105,14 @@ namespace Recorded
             bool walking = motor.IsGrounded && speed > 0.05f;
             float weight = walking ? Mathf.Clamp01(speed / Mathf.Max(0.1f, settings.WalkSpeed)) : 0f;
             Vector3 targetBob = Vector3.zero;
-            if (enableBob && walking)
+            if (walking)
             {
                 // Keep cadence comfortable at FPS movement speeds; do not count metres as footsteps.
                 float cadence = bobFrequency * Mathf.Clamp(speed / Mathf.Max(0.1f, settings.WalkSpeed), 0.65f, 1.35f);
                 bobPhase = Mathf.Repeat(bobPhase + cadence * Mathf.PI * 2f * deltaTime, Mathf.PI * 4f);
-                targetBob = new Vector3(Mathf.Sin(bobPhase * 0.5f) * 0.4f, Mathf.Sin(bobPhase), 0f)
-                    * (bobAmount * weight * (motor.IsCrouching ? 0.5f : 1f));
+                if (enableBob)
+                    targetBob = new Vector3(Mathf.Sin(bobPhase * 0.5f) * 0.4f, Mathf.Sin(bobPhase), 0f)
+                        * (bobAmount * weight * (motor.IsCrouching ? 0.5f : 1f));
             }
             float smoothTime = Mathf.Max(0.01f, motionSmoothTime);
             bobOffset = Vector3.SmoothDamp(bobOffset, targetBob, ref bobVelocity, smoothTime, Mathf.Infinity, deltaTime);

@@ -13,7 +13,7 @@ namespace Recorded.Weapons
 
     /// <summary>
     /// Master controller for the RECORDED Spectrum Gun.
-    /// Manages fire rate, input handling, 6-chamber cylinder integration, first-person viewmodel
+    /// Manages fire rate, input handling, 8-chamber cylinder integration, first-person viewmodel
     /// ergonomics/recoil animation, and real-time color synchronization across Weapon Core, Crosshair, and VFX.
     /// </summary>
     public class SpectrumGunController : MonoBehaviour
@@ -28,9 +28,12 @@ namespace Recorded.Weapons
         private static readonly int FireTrigger = Animator.StringToHash("Fire");
         private static readonly int ReloadTrigger = Animator.StringToHash("Reload");
         public bool IsReloading => _isReloading;
-        public const float ReloadRefillPoint = 1.05f / 1.8f;
+        public const float ReloadRefillPoint = 0.66f;
         public bool ReloadAmmoLoaded { get; private set; }
         public float ReloadProgress => TryGetReloadState(out var state) ? Mathf.Clamp01(state.normalizedTime) : 0f;
+        public float ReloadInsertion => Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(0.40f, ReloadRefillPoint, ReloadProgress));
+        internal Ammo.CylinderAmmoController AmmoController => ammoController;
+        internal Ammo.CylinderRotationController RotationController => rotationController;
         private bool _isReloading;
         private Coroutine _reloadRoutine;
 
@@ -83,6 +86,8 @@ namespace Recorded.Weapons
         {
             ResolveDependencies();
             EnsureViewmodelAndMuzzleAlignment();
+            if (transform.Find("Barrel") != null && GetComponent<RevolverReloadPresentation>() == null)
+                gameObject.AddComponent<RevolverReloadPresentation>();
 
             if (ammoController != null)
             {
@@ -204,7 +209,8 @@ namespace Recorded.Weapons
             _reloadRoutine = null;
             _isReloading = false;
             ReloadAmmoLoaded = false;
-            if (shotAnimator != null && shotAnimator.isActiveAndEnabled && shotAnimator.isInitialized)
+            if (gameObject.activeInHierarchy && shotAnimator != null && shotAnimator.gameObject.activeInHierarchy
+                && shotAnimator.isActiveAndEnabled && shotAnimator.isInitialized)
             {
                 shotAnimator.ResetTrigger(FireTrigger);
                 shotAnimator.ResetTrigger(ReloadTrigger);
@@ -297,7 +303,9 @@ namespace Recorded.Weapons
                     }
                     else if (Keyboard.current.eKey.wasPressedThisFrame)
                     {
-                        rotationController.RotateRight();
+                        var body = GetComponentInParent<CharacterController>();
+                        var player = body != null ? body.transform : transform.root;
+                        if (!SecurityKioskEInteraction.HasInteractionFor(player)) rotationController.RotateRight();
                         return;
                     }
                 }
@@ -456,7 +464,7 @@ namespace Recorded.Weapons
                             }
                         }
 
-                        // 2. Apply persistent 5-second RGB color state to hit target
+                        // 2. Apply persistent RGB color state; the target owns its duration and mix reactions.
                         if (shotColorState != ObjectColorState.None)
                         {
                             IColorReceivable target = hitInfo.collider.GetComponentInParent<IColorReceivable>();

@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 using UnityEditor;
 using UnityEngine;
 using Recorded.ColorSystem;
@@ -9,7 +9,7 @@ namespace Recorded.Testing.Editor
 {
     /// <summary>
     /// Automated Editor verification suite for the RECORDED Spectrum Gun Overhaul:
-    /// - 8-state RGB additive color mixing & independent 5-second timers
+    /// - 8-state RGB additive color mixing & independent primary timers
     /// - 12 o'clock Cylinder Ammo HUD, real revolver rotation sync, and dry-fire rules
     /// - Real physical weapon skills (RED Impulse, GREEN tether between two Green objects, BLUE full stasis)
     /// - Exact barrel-tip MuzzlePoint resolution and close-range viewmodel placement
@@ -147,7 +147,7 @@ namespace Recorded.Testing.Editor
                 bool pass13 = (target.CurrentColorState == ObjectColorState.Red) &&
                               (RGBColorTarget.GetColorForState(target.CurrentColorState) == RGBColorTarget.ColorRed) &&
                               (target.GetRawExpireTime(ObjectColorState.Red) > 0f);
-                LogCase(13, "Applying expired color again starts a new 5-second timer", pass13, ref passedCount, results);
+                LogCase(13, "Applying expired color again starts a fresh primary timer", pass13, ref passedCount, results);
 
                 // Case 14: Order independence (G+R == R+G, B+G+R == R+G+B)
                 target.CacheRenderers();
@@ -200,14 +200,14 @@ namespace Recorded.Testing.Editor
                 bool pass18 = (ind12 != null) && (bracket12 != null) && (ch0Rt != null) && (ch0Rt.anchoredPosition.y > 10f) && Mathf.Abs(ch0Rt.anchoredPosition.x) < 1f;
                 LogCase(18, "Cylinder HUD places stationary firing indicator/bracket and Chamber_0 at 12 o'clock top", pass18, ref passedCount, results);
 
-                // Case 19: Cylinder TestReloadRandom fills all 6 chambers with Red/Green/Cyan
+                // Case 19: Cylinder TestReloadRandom fills all 8 chambers with Red/Green/Cyan
                 ammoCtrl.TestReloadRandom();
                 bool allFilled = true;
                 for (int i = 0; i < CylinderAmmoController.CylinderCapacity; i++)
                 {
                     if (ammoCtrl.GetChamberAmmo(i) == AmmoType.Empty) allFilled = false;
                 }
-                LogCase(19, "Test Reload (R) fills all 6 chambers with non-empty R/G/C ammo", allFilled, ref passedCount, results);
+                LogCase(19, "Test Reload (R) fills all 8 chambers with non-empty R/G/C ammo", allFilled, ref passedCount, results);
 
                 // Case 20: Consuming active round empties chamber; dry fire on empty returns false
                 ammoCtrl.SetActiveChamber(0);
@@ -219,9 +219,9 @@ namespace Recorded.Testing.Editor
 
                 // Case 21: Q / E rotation step direction, immediate active index update & visual angle sync
                 ammoCtrl.SetActiveChamber(0);
-                rotCtrl.RotateChamberStep(1);  // RotateLeft / AutoAdvance -> immediately updates ActiveChamberIndex to 1 and visual angle to +60
+                rotCtrl.RotateChamberStep(1);  // RotateLeft / AutoAdvance -> immediately updates ActiveChamberIndex to 1 and visual angle to +45
                 bool step1Ok = (ammoCtrl.ActiveChamberIndex == 1) && (hud.InnerCylinderRect != null) &&
-                               Mathf.Approximately(Mathf.DeltaAngle(0f, hud.InnerCylinderRect.localEulerAngles.z), 60f);
+                               Mathf.Approximately(Mathf.DeltaAngle(0f, hud.InnerCylinderRect.localEulerAngles.z), CylinderRotationController.ChamberAngleStep);
                 rotCtrl.RotateChamberStep(-1); // RotateRight -> back to index 0 and visual angle 0
                 bool stepBackOk = (ammoCtrl.ActiveChamberIndex == 0) &&
                                   Mathf.Approximately(Mathf.DeltaAngle(0f, hud.InnerCylinderRect.localEulerAngles.z), 0f);
@@ -254,13 +254,15 @@ namespace Recorded.Testing.Editor
                 LogCase(23, "SpectrumSkillResponder applies RED Impulse on hit while preserving duplicate timer rule", pass23, ref passedCount, results);
 
                 // Case 24: Green alone does not tether. Blue fully stops the body and reset restores the snapshot.
-                rb.linearVelocity = Vector3.forward * 10f;
                 secondTarget.ApplyColor(ObjectColorState.Green);
+                bool loneGreenWaits = skillResp.IsGreenBound && !skillResp.IsTethered;
+                secondTarget.ResetColors();
+                rb.linearVelocity = Vector3.forward * 10f;
                 secondTarget.ApplyColor(ObjectColorState.Blue);
                 bool frozen = skillResp.IsBlueStasis && rb.isKinematic && !rb.useGravity
                     && rb.constraints == RigidbodyConstraints.FreezeAll
                     && rb.linearVelocity.sqrMagnitude < 0.0001f;
-                bool statesActive = skillResp.IsGreenBound && !skillResp.IsTethered && frozen;
+                bool statesActive = loneGreenWaits && !skillResp.IsGreenBound && !skillResp.IsTethered && frozen;
                 secondTarget.ResetColors();
                 bool statesRestored = !skillResp.IsGreenBound && !skillResp.IsBlueStasis && rb.useGravity && !rb.isKinematic
                     && (rb.linearVelocity - (Vector3.forward * 10f)).sqrMagnitude < 0.01f;
