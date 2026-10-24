@@ -1,65 +1,74 @@
-﻿using System;
+using System;
+using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 using Recorded.Weapons.Ammo;
 
 namespace Recorded.ColorSystem
 {
     /// <summary>
-    /// Reusable component that implements the 3 physical Spectrum Gun skills:
-    /// - RED (AmmoType.Red): "Impulse" — Immediate directional physical push along shot trajectory/normal.
-    /// - GREEN (AmmoType.Green): "Bind" — Physical tether (SpringJoint + glowing energy line) anchoring the object
-    ///   to its hit anchor point for an independent configurable bindDuration.
-    /// - CYAN (AmmoType.Cyan): "Stasis" — Arrests motion, suspends gravity, and applies stasis field for an
-    ///   independent configurable stasisDuration.
-    ///
-    /// Decoupled from the 5-second RGBColorTarget puzzle color timer so physical skills can have their own
-    /// independent durations while remaining 100% compatible with direct ApplyColor() state changes.
+    /// High-Impact Gameplay & Procedural Sci-Fi VFX Responder for the Spectrum Gun:
+    /// - RED (AmmoType.Red): "Kinetic Shockwave & Ricochet Knockback"
+    ///   Heavy directional launch + spin torque + AoE radial shockwave knocking nearby objects +
+    ///   kinetic chain collision transfer + dual expanding shockwave rings, burst light & kinetic motion trail.
+    /// - GREEN (AmmoType.Green): "Magnetic Grapple & Dual-Target Snap Tether"
+    ///   Smart auto-bind that snaps Green-marked objects or nearby physics bodies together in a high-tension
+    ///   magnetic slam (or snares to hit anchor), rendered with an animated 24-segment dual-helix energy cable
+    ///   and rotating holographic anchor rings.
+    /// - CYAN (AmmoType.Cyan): "Chrono Levitation & Momentum Bank (Stasis Launch)"
+    ///   Anti-gravity hover lift + slow zero-G rotation + BotW-style kinetic momentum bank that stores and
+    ///   amplifies incoming RED/shot forces into a glowing directional launch vector arrow, blasting the object
+    ///   like a rocket when Stasis expires!
+    /// - COMBO SYNERGIES:
+    ///   - YELLOW (Red + Green): Bungee Slingshot Whip (1.5x impulse tension multiplier).
+    ///   - MAGENTA (Red + Blue): Singularity Launch (1.35x stored launch multiplier + release shockwave).
+    ///   - WHITE (Red + Green + Blue): Prismatic Overdrive Supernova (vortex pull + radial burst on release).
     /// </summary>
     [DisallowMultipleComponent]
     public class SpectrumSkillResponder : MonoBehaviour, IColorShotImpact
     {
-        [Header("RED — Impulse (Immediate on Shot Impact)")]
-        [Tooltip("Enable physical impulse push when hit by Red ammo.")]
+        [Header("RED — Kinetic Shockwave & Ricochet Knockback")]
         [SerializeField] private bool enableRedImpulse = true;
+        [SerializeField] private float redImpulseForce = 18.0f;
+        [SerializeField] private float redUpwardLift = 4.5f;
+        [SerializeField] private float redTorqueImpulse = 12.0f;
+        [SerializeField] private float redShockwaveRadius = 4.0f;
+        [SerializeField] private float redShockwaveForce = 14.0f;
+        [SerializeField] private float redShockwaveUpwardModifier = 1.2f;
+        [SerializeField] private float redChainImpactWindow = 1.2f;
+        [SerializeField] private float redChainTransferMultiplier = 0.85f;
 
-        [Tooltip("Force magnitude applied in the shot direction when hit by Red ammo.")]
-        [SerializeField] private float redImpulseForce = 7.5f;
-
-        [Tooltip("Upward lift bias added to Red impulse for responsive physics feel.")]
-        [SerializeField] private float redUpwardLift = 1.6f;
-
-        [Header("GREEN — Bind (Physical Tether & Spring Joint)")]
-        [Tooltip("Enable positional anchor/tether while Green Bind is active.")]
+        [Header("GREEN — Magnetic Grapple & Dual-Target Snap Tether")]
         [SerializeField] private bool enableGreenBind = true;
-
-        [Tooltip("Independent duration in seconds for Green Bind when triggered by a shot (<= 0 uses color state flag).")]
         [SerializeField] private float greenBindDuration = 5.0f;
+        [SerializeField] private float greenSearchRadius = 10.0f;
+        [SerializeField] private float greenBindSpring = 140.0f;
+        [SerializeField] private float greenBindDamping = 8.0f;
+        [SerializeField] private float greenBindMaxDistance = 0.15f;
+        [SerializeField] private float greenInitialSnapPullImpulse = 10.0f;
 
-        [Tooltip("Spring strength pulling the object toward its bind anchor point.")]
-        [SerializeField] private float greenBindSpring = 55.0f;
-
-        [Tooltip("Linear damping applied while bound.")]
-        [SerializeField] private float greenBindDamping = 12.0f;
-
-        [Tooltip("Maximum distance tolerance before the spring pulls at full force.")]
-        [SerializeField] private float greenBindMaxDistance = 0.25f;
-
-        [Header("CYAN — Stasis (Motion Arrest & Gravity Suspension)")]
-        [Tooltip("Enable stasis motion arrest/slowdown when hit by Cyan ammo.")]
+        [Header("CYAN — Chrono Levitation & Momentum Bank (Stasis)")]
         [SerializeField] private bool enableCyanStasis = true;
-
-        [Tooltip("Independent duration in seconds for Cyan Stasis when triggered by a shot (<= 0 uses color state flag).")]
         [SerializeField] private float cyanStasisDuration = 5.0f;
-
-        [Tooltip("If true, completely freezes Rigidbody motion during Stasis. If false, applies heavy drag slowdown.")]
         [SerializeField] private bool fullFreezeOnStasis = false;
-
-        [Tooltip("Velocity multiplier when Stasis begins (0.08 = 92% immediate speed reduction).")]
         [Range(0f, 1f)]
-        [SerializeField] private float stasisInitialVelocityScale = 0.08f;
+        [SerializeField] private float stasisInitialVelocityScale = 0.02f;
+        [SerializeField] private float stasisLinearDamping = 35.0f;
+        [SerializeField] private float stasisHoverLiftImpulse = 2.8f;
+        [SerializeField] private float stasisIdleSpinSpeed = 28.0f;
+        [SerializeField] private float stasisMomentumPerRedShot = 18.0f;
+        [SerializeField] private float stasisMaxStoredImpulse = 70.0f;
+        [SerializeField] private float stasisLaunchUpwardBias = 0.25f;
 
-        [Tooltip("Linear damping applied while in Stasis slowdown mode.")]
-        [SerializeField] private float stasisLinearDamping = 22.0f;
+        [Header("COMBO SYNERGIES (Yellow / Magenta / White)")]
+        [SerializeField] private float yellowSlingshotTensionMultiplier = 1.5f;
+        [SerializeField] private float magentaLaunchMultiplier = 1.35f;
+        [SerializeField] private float magentaReleaseShockwaveRadius = 4.5f;
+        [SerializeField] private float magentaReleaseShockwaveForce = 16.0f;
+        [SerializeField] private float whiteVortexPullRadius = 6.0f;
+        [SerializeField] private float whiteVortexPullForce = 9.0f;
+        [SerializeField] private float whiteSupernovaRadius = 6.5f;
+        [SerializeField] private float whiteSupernovaForce = 24.0f;
 
         private IColorReceivable _colorTarget;
         private Rigidbody _rb;
@@ -72,33 +81,69 @@ namespace Recorded.ColorSystem
         private bool _originalUseGravity;
         private RigidbodyConstraints _originalConstraints;
 
-        // Independent skill timers & state
+        // RED state
+        private Vector3 _lastRedImpulseApplied;
+        private int _redImpulseHitCount;
+        private float _redChainTimer;
+        private TrailRenderer _kineticTrail;
+        private Coroutine _trailFadeCoroutine;
+
+        // GREEN Bind state & Dual-Helix VFX
         private bool _isGreenBound;
         private float _greenBindTimer;
         private bool _greenFromColorFlag;
         private Vector3 _greenBindAnchorPoint;
         private Vector3 _greenLocalAttachPoint;
+        private Rigidbody _connectedPartnerBody;
         private SpringJoint _activeBindJoint;
-        private LineRenderer _bindTetherLine;
+        private LineRenderer _bindPrimaryHelixLine;
+        private LineRenderer _bindSecondaryHelixLine;
+        private LineRenderer _bindStartAnchorRing;
+        private LineRenderer _bindEndAnchorRing;
+        private const int TetherSegmentCount = 24;
+        private const int RingSegmentCount = 24;
 
+        // CYAN Stasis state, Momentum Bank & Chrono Cage VFX
         private bool _isBlueStasis;
         private float _blueStasisTimer;
         private bool _blueFromColorFlag;
+        private Vector3 _storedStasisImpulse;
+        private int _storedStasisHitCount;
+        private GameObject _chronoFieldRoot;
+        private LineRenderer _chronoRingXY;
+        private LineRenderer _chronoRingYZ;
+        private LineRenderer _chronoVectorArrowLine;
+        private Light _chronoPointLight;
 
-        private Vector3 _lastRedImpulseApplied;
-        private int _redImpulseHitCount;
+        // WHITE Prismatic Overdrive state
+        private bool _wasWhiteOverdrive;
+
+        private static Shader _cachedUnlitShader;
 
         public bool IsGreenBound => _isGreenBound;
         public bool IsBlueStasis => _isBlueStasis;
         public float RemainingBindTime => _isGreenBound ? Mathf.Max(0f, _greenBindTimer) : 0f;
         public float RemainingStasisTime => _isBlueStasis ? Mathf.Max(0f, _blueStasisTimer) : 0f;
-        public Vector3 GreenBindAnchorPoint => _greenBindAnchorPoint;
+        public Vector3 GreenBindAnchorPoint => _connectedPartnerBody != null ? _connectedPartnerBody.worldCenterOfMass : _greenBindAnchorPoint;
+        public Rigidbody ConnectedPartnerBody => _connectedPartnerBody;
         public SpringJoint ActiveBindJoint => _activeBindJoint;
         public Vector3 LastRedImpulseApplied => _lastRedImpulseApplied;
         public int RedImpulseHitCount => _redImpulseHitCount;
+        public Vector3 StoredStasisImpulse => _storedStasisImpulse;
+        public int StoredStasisHitCount => _storedStasisHitCount;
 
         public event Action<bool> OnBindStateChanged;
         public event Action<bool> OnStasisStateChanged;
+
+        private static Shader GetUnlitShader()
+        {
+            if (_cachedUnlitShader == null)
+            {
+                _cachedUnlitShader = Shader.Find("Universal Render Pipeline/Unlit");
+                if (_cachedUnlitShader == null) _cachedUnlitShader = Shader.Find("Sprites/Default");
+            }
+            return _cachedUnlitShader;
+        }
 
         private void Awake()
         {
@@ -119,8 +164,11 @@ namespace Recorded.ColorSystem
             }
 
             ClearBindJointAndVisual();
+            SetChronoFieldActive(false);
             _isGreenBound = false;
             _isBlueStasis = false;
+            _storedStasisImpulse = Vector3.zero;
+            _storedStasisHitCount = 0;
             RestoreOriginalPhysics();
         }
 
@@ -166,46 +214,118 @@ namespace Recorded.ColorSystem
 
         /// <summary>
         /// Invoked on every shot hit before/alongside color state application.
-        /// Executes immediate shot effects (RED Impulse, GREEN Bind tether, CYAN Stasis) with independent skill timers.
+        /// Executes high-impact physical skills and procedural Sci-Fi VFX.
         /// </summary>
         public void OnColorShotHit(AmmoType firedAmmo, ObjectColorState mappedColorFlag, RaycastHit hitInfo, Vector3 shotDirection)
         {
             EnsureInitialized();
 
-            // 1. RED — Impulse: Immediate physical push on impact
+            Vector3 hitPoint = hitInfo.point.sqrMagnitude > 0.0001f
+                ? hitInfo.point
+                : (_rb != null ? _rb.worldCenterOfMass : transform.position);
+            Vector3 hitNormal = hitInfo.normal.sqrMagnitude > 0.0001f ? hitInfo.normal : -shotDirection.normalized;
+            Vector3 pushDir = shotDirection.sqrMagnitude > 0.001f ? shotDirection.normalized : -hitNormal;
+
+            // 1. RED — Kinetic Shockwave, Spin Torque, AoE Blast & Stasis Momentum Bank
             if (enableRedImpulse && (firedAmmo == AmmoType.Red || (mappedColorFlag & ObjectColorState.Red) != 0))
             {
-                Vector3 pushDir = shotDirection.sqrMagnitude > 0.001f ? shotDirection.normalized : -hitInfo.normal;
-                Vector3 impulse = (pushDir * redImpulseForce) + (Vector3.up * redUpwardLift);
-                _lastRedImpulseApplied = impulse;
-                _redImpulseHitCount++;
-
-                if (_rb != null && !_rb.isKinematic)
-                {
-                    Vector3 hitPoint = hitInfo.point.sqrMagnitude > 0.0001f ? hitInfo.point : _rb.worldCenterOfMass;
-                    if (Application.isPlaying)
-                    {
-                        _rb.AddForceAtPosition(impulse, hitPoint, ForceMode.Impulse);
-                    }
-                    else
-                    {
-                        float mass = Mathf.Max(0.001f, _rb.mass);
-                        _rb.linearVelocity += impulse / mass;
-                    }
-                }
+                ExecuteRedImpulseSkill(hitPoint, hitNormal, pushDir);
             }
 
-            // 2. GREEN — Bind: Physical tether & SpringJoint with independent duration
+            // 2. GREEN — Smart Auto-Bind Magnetic Grapple & Dual-Helix Tether
             if (enableGreenBind && (firedAmmo == AmmoType.Green || (mappedColorFlag & ObjectColorState.Green) != 0))
             {
-                Vector3 anchorPos = hitInfo.point.sqrMagnitude > 0.0001f ? hitInfo.point : transform.position;
-                ActivateGreenBind(anchorPos, greenBindDuration > 0f ? greenBindDuration : 5.0f, false);
+                ActivateGreenBind(hitPoint, greenBindDuration > 0f ? greenBindDuration : 5.0f, false);
             }
 
-            // 3. CYAN — Stasis: Motion arrest & gravity suspension with independent duration
+            // 3. CYAN — Chrono Levitation & Momentum Bank Stasis Field
             if (enableCyanStasis && (firedAmmo == AmmoType.Cyan || (mappedColorFlag & ObjectColorState.Blue) != 0))
             {
                 ActivateCyanStasis(cyanStasisDuration > 0f ? cyanStasisDuration : 5.0f, false);
+            }
+        }
+
+        private void ExecuteRedImpulseSkill(Vector3 hitPoint, Vector3 hitNormal, Vector3 pushDir)
+        {
+            // YELLOW Synergy (Red + Green Bungee Slingshot Whip): boost impulse when tethered
+            float synergyMult = _isGreenBound ? yellowSlingshotTensionMultiplier : 1.0f;
+            Vector3 impulse = ((pushDir * redImpulseForce) + (Vector3.up * redUpwardLift)) * synergyMult;
+
+            _lastRedImpulseApplied = impulse;
+            _redImpulseHitCount++;
+            _redChainTimer = redChainImpactWindow;
+
+            // If currently in CYAN Stasis, bank the kinetic momentum for a massive rocket launch on release!
+            if (_isBlueStasis)
+            {
+                Vector3 addedMomentum = (pushDir + (Vector3.up * stasisLaunchUpwardBias)).normalized * (stasisMomentumPerRedShot * synergyMult);
+                _storedStasisImpulse = Vector3.ClampMagnitude(_storedStasisImpulse + addedMomentum, stasisMaxStoredImpulse);
+                _storedStasisHitCount++;
+
+                // Nudge angular spin slightly and update the glowing launch vector arrow
+                if (_rb != null && !_rb.isKinematic && Application.isPlaying)
+                {
+                    _rb.AddTorque(Vector3.Cross(pushDir, Vector3.up) * 2.5f, ForceMode.Impulse);
+                }
+                UpdateChronoFieldVisuals();
+            }
+            else if (_rb != null && !_rb.isKinematic)
+            {
+                if (Application.isPlaying)
+                {
+                    _rb.AddForceAtPosition(impulse, hitPoint, ForceMode.Impulse);
+
+                    // Dramatic spin torque so boxes tumble mid-air instead of sliding flat
+                    Vector3 lever = hitPoint - _rb.worldCenterOfMass;
+                    Vector3 torqueAxis = Vector3.Cross(lever.sqrMagnitude > 0.001f ? lever.normalized : Vector3.up, pushDir);
+                    if (torqueAxis.sqrMagnitude < 0.01f)
+                    {
+                        torqueAxis = Vector3.Cross(Vector3.up, pushDir);
+                    }
+                    _rb.AddTorque(torqueAxis.normalized * redTorqueImpulse * synergyMult, ForceMode.Impulse);
+                }
+                else
+                {
+                    float mass = Mathf.Max(0.001f, _rb.mass);
+                    _rb.linearVelocity += impulse / mass;
+                }
+            }
+
+            // AoE Radial Shockwave: blast nearby physics props outward from impact point
+            ApplyRadialShockwave(hitPoint, redShockwaveRadius, redShockwaveForce * synergyMult, redShockwaveUpwardModifier, _rb);
+
+            if (Application.isPlaying)
+            {
+                SpawnRedShockwaveVFX(hitPoint, hitNormal, pushDir);
+                ActivateKineticTrail(new Color(1f, 0.22f, 0.18f, 0.85f), 0.55f);
+            }
+        }
+
+        private void ApplyRadialShockwave(Vector3 center, float radius, float force, float upwardMod, Rigidbody ignoreBody)
+        {
+            if (radius <= 0.01f || force <= 0.01f) return;
+
+            Collider[] colliders = Physics.OverlapSphere(center, radius);
+            HashSet<Rigidbody> affected = new HashSet<Rigidbody>();
+            if (ignoreBody != null) affected.Add(ignoreBody);
+
+            for (int i = 0; i < colliders.Length; i++)
+            {
+                Rigidbody otherRb = colliders[i].attachedRigidbody;
+                if (otherRb == null || otherRb.isKinematic || affected.Contains(otherRb)) continue;
+                // Never push the Player character
+                if (otherRb.CompareTag("Player") || otherRb.GetComponent("PlayerMovement") != null) continue;
+
+                affected.Add(otherRb);
+                if (Application.isPlaying)
+                {
+                    otherRb.AddExplosionForce(force, center, radius, upwardMod, ForceMode.Impulse);
+                }
+                else
+                {
+                    Vector3 dir = (otherRb.worldCenterOfMass - center).normalized + (Vector3.up * 0.3f);
+                    otherRb.linearVelocity += dir.normalized * (force / Mathf.Max(1f, otherRb.mass));
+                }
             }
         }
 
@@ -217,10 +337,30 @@ namespace Recorded.ColorSystem
             _isGreenBound = true;
             _greenFromColorFlag = fromColorFlag;
             _greenBindTimer = Mathf.Max(_greenBindTimer, duration);
-            _greenBindAnchorPoint = worldAnchor;
-            _greenLocalAttachPoint = transform.InverseTransformPoint(worldAnchor);
+            _greenLocalAttachPoint = _rb != null ? transform.InverseTransformPoint(_rb.worldCenterOfMass) : Vector3.zero;
 
-            CreateOrUpdateBindJoint(worldAnchor);
+            // Smart Auto-Bind Target Acquisition: find another Green object or nearby dynamic Rigidbody to slam together!
+            _connectedPartnerBody = FindBestGreenBindPartner(worldAnchor, out Vector3 resolvedAnchor);
+            _greenBindAnchorPoint = resolvedAnchor;
+
+            CreateOrUpdateBindJoint(_connectedPartnerBody, _greenBindAnchorPoint);
+
+            // Immediate high-tension magnetic snap pull so the player instantly sees the objects yank toward each other
+            if (_rb != null && !_rb.isKinematic && Application.isPlaying)
+            {
+                Vector3 targetPos = _connectedPartnerBody != null ? _connectedPartnerBody.worldCenterOfMass : _greenBindAnchorPoint;
+                Vector3 pullDir = (targetPos - _rb.worldCenterOfMass);
+                if (pullDir.sqrMagnitude > 0.04f)
+                {
+                    Vector3 pullImpulse = (pullDir.normalized + Vector3.up * 0.22f).normalized * greenInitialSnapPullImpulse;
+                    _rb.AddForce(pullImpulse, ForceMode.Impulse);
+                    if (_connectedPartnerBody != null && !_connectedPartnerBody.isKinematic)
+                    {
+                        _connectedPartnerBody.AddForce(-pullImpulse, ForceMode.Impulse);
+                    }
+                }
+            }
+
             UpdateBindTetherVisual();
             ApplyStatePhysicsModifiers();
 
@@ -230,6 +370,57 @@ namespace Recorded.ColorSystem
             }
         }
 
+        private Rigidbody FindBestGreenBindPartner(Vector3 fallbackWorldAnchor, out Vector3 resolvedWorldAnchor)
+        {
+            resolvedWorldAnchor = fallbackWorldAnchor;
+            if (greenSearchRadius <= 0.1f) return null;
+
+            Collider[] hits = Physics.OverlapSphere(transform.position, greenSearchRadius);
+            Rigidbody bestGreenPartner = null;
+            float bestGreenDistSq = float.MaxValue;
+
+            Rigidbody bestDynamicPartner = null;
+            float bestDynamicDistSq = float.MaxValue;
+
+            for (int i = 0; i < hits.Length; i++)
+            {
+                Rigidbody candidateRb = hits[i].attachedRigidbody;
+                if (candidateRb == null || candidateRb == _rb || candidateRb.isKinematic) continue;
+                if (candidateRb.CompareTag("Player") || candidateRb.GetComponent("PlayerMovement") != null) continue;
+
+                float distSq = (candidateRb.worldCenterOfMass - transform.position).sqrMagnitude;
+                if (distSq < 0.05f) continue;
+
+                // Priority 1: Another object that currently has Green color state or active Green Bind
+                IColorReceivable colorRec = candidateRb.GetComponent<IColorReceivable>();
+                SpectrumSkillResponder otherSkill = candidateRb.GetComponent<SpectrumSkillResponder>();
+                bool isPartnerGreen = (colorRec != null && (colorRec.CurrentColorState & ObjectColorState.Green) != 0) ||
+                                      (otherSkill != null && otherSkill.IsGreenBound);
+
+                if (isPartnerGreen && distSq < bestGreenDistSq)
+                {
+                    bestGreenDistSq = distSq;
+                    bestGreenPartner = candidateRb;
+                }
+                else if (distSq < bestDynamicDistSq)
+                {
+                    bestDynamicDistSq = distSq;
+                    bestDynamicPartner = candidateRb;
+                }
+            }
+
+            Rigidbody chosen = bestGreenPartner != null ? bestGreenPartner : bestDynamicPartner;
+            if (chosen != null)
+            {
+                resolvedWorldAnchor = chosen.worldCenterOfMass;
+                return chosen;
+            }
+
+            // Fallback: offset anchor slightly upward from hit point so the object gets yanked visibly into the air
+            resolvedWorldAnchor = fallbackWorldAnchor + (Vector3.up * 0.85f);
+            return null;
+        }
+
         public void DeactivateGreenBind()
         {
             if (!_isGreenBound) return;
@@ -237,6 +428,7 @@ namespace Recorded.ColorSystem
             _isGreenBound = false;
             _greenBindTimer = 0f;
             _greenFromColorFlag = false;
+            _connectedPartnerBody = null;
             ClearBindJointAndVisual();
             ApplyStatePhysicsModifiers();
             OnBindStateChanged?.Invoke(false);
@@ -251,13 +443,33 @@ namespace Recorded.ColorSystem
             _blueFromColorFlag = fromColorFlag;
             _blueStasisTimer = Mathf.Max(_blueStasisTimer, duration);
 
-            if (!wasStasis && _rb != null && !_rb.isKinematic)
+            if (!wasStasis)
             {
-                _rb.linearVelocity *= stasisInitialVelocityScale;
-                _rb.angularVelocity *= stasisInitialVelocityScale;
+                _storedStasisImpulse = Vector3.zero;
+                _storedStasisHitCount = 0;
+
+                if (_rb != null && !_rb.isKinematic)
+                {
+                    // Capture existing high velocity into the momentum bank if the object was already flying!
+                    if (_rb.linearVelocity.sqrMagnitude > 4.0f)
+                    {
+                        _storedStasisImpulse = Vector3.ClampMagnitude(_rb.linearVelocity * _rb.mass * 0.85f, stasisMaxStoredImpulse);
+                    }
+
+                    _rb.linearVelocity *= stasisInitialVelocityScale;
+                    _rb.angularVelocity *= stasisInitialVelocityScale;
+
+                    // Anti-gravity upward hover lift so the player clearly sees the target float off the floor
+                    if (Application.isPlaying && !fullFreezeOnStasis)
+                    {
+                        _rb.AddForce(Vector3.up * stasisHoverLiftImpulse, ForceMode.VelocityChange);
+                    }
+                }
             }
 
             ApplyStatePhysicsModifiers();
+            SetChronoFieldActive(true);
+            UpdateChronoFieldVisuals();
 
             if (!wasStasis)
             {
@@ -269,10 +481,48 @@ namespace Recorded.ColorSystem
         {
             if (!_isBlueStasis) return;
 
+            bool hadMagentaSynergy = _colorTarget != null &&
+                                     (_colorTarget.CurrentColorState & (ObjectColorState.Red | ObjectColorState.Blue)) == (ObjectColorState.Red | ObjectColorState.Blue);
+            Vector3 releaseImpulse = _storedStasisImpulse;
+            int releaseHits = _storedStasisHitCount;
+
             _isBlueStasis = false;
             _blueStasisTimer = 0f;
             _blueFromColorFlag = false;
+            _storedStasisImpulse = Vector3.zero;
+            _storedStasisHitCount = 0;
+
+            SetChronoFieldActive(false);
             ApplyStatePhysicsModifiers();
+
+            // Release banked kinetic momentum (BotW Stasis Launch + MAGENTA Singularity Burst!)
+            if (releaseImpulse.sqrMagnitude > 0.01f && _rb != null && !_rb.isKinematic)
+            {
+                float mult = (hadMagentaSynergy || releaseHits > 0) ? magentaLaunchMultiplier : 1.0f;
+                Vector3 finalBlast = releaseImpulse * mult;
+                _lastRedImpulseApplied = finalBlast;
+                _redChainTimer = redChainImpactWindow;
+
+                if (Application.isPlaying)
+                {
+                    _rb.linearVelocity = Vector3.zero;
+                    _rb.AddForce(finalBlast, ForceMode.Impulse);
+                    _rb.AddTorque(Vector3.Cross(Vector3.up, finalBlast.normalized) * redTorqueImpulse, ForceMode.Impulse);
+
+                    SpawnRedShockwaveVFX(_rb.worldCenterOfMass, -finalBlast.normalized, finalBlast.normalized);
+                    ActivateKineticTrail(new Color(1f, 0.15f, 0.9f, 0.9f), 0.75f);
+                }
+                else
+                {
+                    _rb.linearVelocity += finalBlast / Mathf.Max(0.001f, _rb.mass);
+                }
+
+                if (hadMagentaSynergy || releaseHits >= 2)
+                {
+                    ApplyRadialShockwave(transform.position, magentaReleaseShockwaveRadius, magentaReleaseShockwaveForce, 1.3f, _rb);
+                }
+            }
+
             OnStasisStateChanged?.Invoke(false);
         }
 
@@ -286,6 +536,28 @@ namespace Recorded.ColorSystem
 
             bool greenFlag = enableGreenBind && (newState & ObjectColorState.Green) != 0;
             bool blueFlag = enableCyanStasis && (newState & ObjectColorState.Blue) != 0;
+            bool isWhite = (newState & (ObjectColorState.Red | ObjectColorState.Green | ObjectColorState.Blue)) ==
+                           (ObjectColorState.Red | ObjectColorState.Green | ObjectColorState.Blue);
+
+            // WHITE Prismatic Supernova Burst when White overdrive state ends or triggers
+            if (isWhite && !_wasWhiteOverdrive)
+            {
+                _wasWhiteOverdrive = true;
+                if (Application.isPlaying)
+                {
+                    SpawnRedShockwaveVFX(transform.position, Vector3.up, Vector3.up);
+                    ActivateKineticTrail(Color.white, 0.8f);
+                }
+            }
+            else if (!isWhite && _wasWhiteOverdrive)
+            {
+                _wasWhiteOverdrive = false;
+                ApplyRadialShockwave(transform.position, whiteSupernovaRadius, whiteSupernovaForce, 1.5f, _rb);
+                if (Application.isPlaying)
+                {
+                    SpawnRedShockwaveVFX(transform.position, Vector3.up, Vector3.up);
+                }
+            }
 
             // Support direct ApplyColor() calls (e.g., from puzzle scripts or unit tests)
             if (greenFlag && !_isGreenBound)
@@ -310,9 +582,15 @@ namespace Recorded.ColorSystem
         private void Update()
         {
             TickSkillTimers(Time.deltaTime);
+
             if (_isGreenBound)
             {
                 UpdateBindTetherVisual();
+            }
+
+            if (_isBlueStasis)
+            {
+                UpdateChronoFieldVisuals();
             }
         }
 
@@ -322,6 +600,11 @@ namespace Recorded.ColorSystem
         public void TickSkillTimers(float deltaTime)
         {
             if (deltaTime <= 0f) return;
+
+            if (_redChainTimer > 0f)
+            {
+                _redChainTimer = Mathf.Max(0f, _redChainTimer - deltaTime);
+            }
 
             if (_isGreenBound && _greenBindTimer > 0f)
             {
@@ -344,22 +627,73 @@ namespace Recorded.ColorSystem
 
         private void FixedUpdate()
         {
-            if (!_isGreenBound || _rb == null || _rb.isKinematic) return;
+            if (_rb == null || _rb.isKinematic) return;
 
-            // Reinforce spring pull toward anchor position while Green Bind is active
-            Vector3 currentAttachWorld = transform.TransformPoint(_greenLocalAttachPoint);
-            Vector3 offset = _greenBindAnchorPoint - currentAttachWorld;
-            if (offset.sqrMagnitude > 0.0001f)
+            // 1. GREEN Bind high-tension magnetic pull
+            if (_isGreenBound)
             {
-                _rb.AddForceAtPosition(offset * greenBindSpring, currentAttachWorld, ForceMode.Acceleration);
+                Vector3 currentAttachWorld = transform.TransformPoint(_greenLocalAttachPoint);
+                Vector3 targetAnchor = _connectedPartnerBody != null ? _connectedPartnerBody.worldCenterOfMass : _greenBindAnchorPoint;
+                Vector3 offset = targetAnchor - currentAttachWorld;
+
+                if (offset.sqrMagnitude > 0.0004f)
+                {
+                    _rb.AddForceAtPosition(offset * (greenBindSpring * 0.45f), currentAttachWorld, ForceMode.Acceleration);
+                    if (_connectedPartnerBody != null && !_connectedPartnerBody.isKinematic)
+                    {
+                        _connectedPartnerBody.AddForce(-offset * (greenBindSpring * 0.45f), ForceMode.Acceleration);
+                    }
+                }
+            }
+
+            // 2. CYAN Stasis zero-G hover bob & slow chrono rotation
+            if (_isBlueStasis && !fullFreezeOnStasis)
+            {
+                float bobForce = Mathf.Sin(Time.fixedTime * 3.5f) * 1.6f;
+                _rb.AddForce(Vector3.up * bobForce, ForceMode.Acceleration);
+                _rb.MoveRotation(_rb.rotation * Quaternion.Euler(0f, stasisIdleSpinSpeed * Time.fixedDeltaTime, stasisIdleSpinSpeed * 0.35f * Time.fixedDeltaTime));
+            }
+
+            // 3. WHITE Prismatic Overdrive Vortex Pull: draw nearby objects inward before Supernova burst
+            if (_wasWhiteOverdrive)
+            {
+                Collider[] nearby = Physics.OverlapSphere(transform.position, whiteVortexPullRadius);
+                for (int i = 0; i < nearby.Length; i++)
+                {
+                    Rigidbody otherRb = nearby[i].attachedRigidbody;
+                    if (otherRb == null || otherRb == _rb || otherRb.isKinematic) continue;
+                    if (otherRb.CompareTag("Player") || otherRb.GetComponent("PlayerMovement") != null) continue;
+
+                    Vector3 pull = (_rb.worldCenterOfMass - otherRb.worldCenterOfMass);
+                    if (pull.sqrMagnitude > 0.25f)
+                    {
+                        otherRb.AddForce(pull.normalized * whiteVortexPullForce, ForceMode.Acceleration);
+                    }
+                }
             }
         }
 
-        private void CreateOrUpdateBindJoint(Vector3 worldAnchor)
+        private void OnCollisionEnter(Collision collision)
+        {
+            // RED Kinetic Chain Impact: transfer explosive knockback when a Red-launched object slams into another physics prop
+            if (_redChainTimer <= 0f || collision.rigidbody == null || collision.rigidbody.isKinematic) return;
+            if (collision.rigidbody.CompareTag("Player")) return;
+
+            Vector3 transferDir = (collision.rigidbody.worldCenterOfMass - transform.position).normalized + (Vector3.up * 0.3f);
+            Vector3 chainImpulse = transferDir.normalized * (_lastRedImpulseApplied.magnitude * redChainTransferMultiplier);
+            collision.rigidbody.AddForce(chainImpulse, ForceMode.Impulse);
+            collision.rigidbody.AddTorque(Vector3.Cross(Vector3.up, transferDir) * (redTorqueImpulse * 0.7f), ForceMode.Impulse);
+
+            if (Application.isPlaying && collision.contactCount > 0)
+            {
+                SpawnRedShockwaveVFX(collision.GetContact(0).point, collision.GetContact(0).normal, transferDir.normalized);
+            }
+        }
+
+        private void CreateOrUpdateBindJoint(Rigidbody partnerBody, Vector3 worldAnchor)
         {
             if (_rb == null) return;
 
-            // Reuse existing joint to prevent duplicate joint accumulation
             if (_activeBindJoint == null)
             {
                 _activeBindJoint = gameObject.GetComponent<SpringJoint>();
@@ -370,9 +704,19 @@ namespace Recorded.ColorSystem
             }
 
             _activeBindJoint.autoConfigureConnectedAnchor = false;
-            _activeBindJoint.connectedBody = null;
             _activeBindJoint.anchor = _greenLocalAttachPoint;
-            _activeBindJoint.connectedAnchor = worldAnchor;
+
+            if (partnerBody != null)
+            {
+                _activeBindJoint.connectedBody = partnerBody;
+                _activeBindJoint.connectedAnchor = Vector3.zero;
+            }
+            else
+            {
+                _activeBindJoint.connectedBody = null;
+                _activeBindJoint.connectedAnchor = worldAnchor;
+            }
+
             _activeBindJoint.spring = greenBindSpring * Mathf.Max(1f, _rb.mass);
             _activeBindJoint.damper = greenBindDamping;
             _activeBindJoint.minDistance = 0f;
@@ -380,33 +724,196 @@ namespace Recorded.ColorSystem
             _activeBindJoint.enableCollision = true;
         }
 
+        // =====================================================================
+        // PROCEDURAL SCI-FI VFX (Non-Occluding, Zero External Assets Required)
+        // =====================================================================
+
+        private void SpawnRedShockwaveVFX(Vector3 hitPoint, Vector3 hitNormal, Vector3 pushDir)
+        {
+            if (!Application.isPlaying || !isActiveAndEnabled) return;
+            StartCoroutine(AnimateRedShockwaveRoutine(hitPoint, hitNormal, pushDir));
+        }
+
+        private IEnumerator AnimateRedShockwaveRoutine(Vector3 hitPoint, Vector3 hitNormal, Vector3 pushDir)
+        {
+            GameObject vfxRoot = new GameObject("RedShockwave_BurstVFX");
+            vfxRoot.transform.position = hitPoint + (hitNormal * 0.03f);
+            Quaternion ringRot = pushDir.sqrMagnitude > 0.001f ? Quaternion.LookRotation(pushDir) : Quaternion.identity;
+
+            Color hdrRed = new Color(1.0f, 0.22f, 0.16f, 0.95f);
+            Color hdrOrange = new Color(1.0f, 0.62f, 0.15f, 0.9f);
+
+            LineRenderer outerRing = CreateProceduralLine(vfxRoot.transform, "ShockRing_Outer", RingSegmentCount, true, 0.065f, hdrRed);
+            LineRenderer innerMachRing = CreateProceduralLine(vfxRoot.transform, "ShockRing_MachCone", RingSegmentCount, true, 0.045f, hdrOrange);
+
+            // 8 Radial kinetic spark streaks shooting outward
+            const int sparkCount = 8;
+            LineRenderer[] sparkLines = new LineRenderer[sparkCount];
+            Vector3[] sparkDirs = new Vector3[sparkCount];
+            Quaternion basis = Quaternion.LookRotation(hitNormal.sqrMagnitude > 0.001f ? hitNormal : Vector3.up);
+            for (int s = 0; s < sparkCount; s++)
+            {
+                float angle = (s / (float)sparkCount) * Mathf.PI * 2f;
+                Vector3 radial = basis * new Vector3(Mathf.Cos(angle), Mathf.Sin(angle), 0.35f).normalized;
+                sparkDirs[s] = radial;
+                sparkLines[s] = CreateProceduralLine(vfxRoot.transform, $"KineticSpark_{s}", 2, false, 0.03f, hdrOrange);
+            }
+
+            Light blastLight = vfxRoot.AddComponent<Light>();
+            blastLight.type = LightType.Point;
+            blastLight.color = new Color(1f, 0.25f, 0.15f);
+            blastLight.range = 5.5f;
+            blastLight.intensity = 7.5f;
+
+            float duration = 0.26f;
+            float elapsed = 0f;
+
+            while (elapsed < duration)
+            {
+                elapsed += Time.deltaTime;
+                float t = Mathf.Clamp01(elapsed / duration);
+                float easeOut = 1f - Mathf.Pow(1f - t, 3f);
+
+                float outerRadius = Mathf.Lerp(0.12f, 1.65f, easeOut);
+                float innerRadius = Mathf.Lerp(0.08f, 1.15f, easeOut);
+                Vector3 innerCenter = vfxRoot.transform.position + (pushDir * (easeOut * 0.45f));
+
+                SetCirclePositions(outerRing, vfxRoot.transform.position, ringRot, outerRadius);
+                SetCirclePositions(innerMachRing, innerCenter, ringRot, innerRadius);
+
+                float widthScale = 1f - t;
+                outerRing. widthMultiplier = 0.07f * widthScale;
+                innerMachRing.widthMultiplier = 0.045f * widthScale;
+
+                for (int s = 0; s < sparkCount; s++)
+                {
+                    Vector3 p0 = vfxRoot.transform.position + sparkDirs[s] * (easeOut * 0.95f);
+                    Vector3 p1 = vfxRoot.transform.position + sparkDirs[s] * (easeOut * 1.55f);
+                    sparkLines[s].SetPosition(0, p0);
+                    sparkLines[s].SetPosition(1, p1);
+                    sparkLines[s].widthMultiplier = 0.032f * widthScale;
+                }
+
+                blastLight.intensity = Mathf.Lerp(7.5f, 0f, t);
+                yield return null;
+            }
+
+            if (vfxRoot != null)
+            {
+                Destroy(vfxRoot);
+            }
+        }
+
+        private void ActivateKineticTrail(Color trailColor, float duration)
+        {
+            if (!Application.isPlaying || !isActiveAndEnabled) return;
+
+            if (_kineticTrail == null)
+            {
+                GameObject trailObj = new GameObject("KineticMotion_Trail");
+                trailObj.transform.SetParent(transform, false);
+                trailObj.transform.localPosition = Vector3.zero;
+
+                _kineticTrail = trailObj.AddComponent<TrailRenderer>();
+                _kineticTrail.time = 0.32f;
+                _kineticTrail.minVertexDistance = 0.05f;
+                _kineticTrail.startWidth = 0.24f;
+                _kineticTrail.endWidth = 0.0f;
+                _kineticTrail.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                _kineticTrail.receiveShadows = false;
+                _kineticTrail.sharedMaterial = new Material(GetUnlitShader()) { color = trailColor };
+            }
+
+            if (_kineticTrail.sharedMaterial != null)
+            {
+                _kineticTrail.sharedMaterial.color = trailColor;
+            }
+            _kineticTrail.Clear();
+            _kineticTrail.emitting = true;
+
+            if (_trailFadeCoroutine != null) StopCoroutine(_trailFadeCoroutine);
+            _trailFadeCoroutine = StartCoroutine(DisableTrailAfterDelay(duration));
+        }
+
+        private IEnumerator DisableTrailAfterDelay(float delay)
+        {
+            yield return new WaitForSeconds(delay);
+            if (_kineticTrail != null)
+            {
+                _kineticTrail.emitting = false;
+            }
+            _trailFadeCoroutine = null;
+        }
+
         private void UpdateBindTetherVisual()
         {
             if (!Application.isPlaying) return;
 
-            if (_bindTetherLine == null)
-            {
-                GameObject lineObj = new GameObject("GreenBind_TetherLine");
-                lineObj.transform.SetParent(transform, false);
-                _bindTetherLine = lineObj.AddComponent<LineRenderer>();
-                _bindTetherLine.positionCount = 2;
-                _bindTetherLine.useWorldSpace = true;
-                _bindTetherLine.startWidth = 0.035f;
-                _bindTetherLine.endWidth = 0.02f;
-                _bindTetherLine.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-                _bindTetherLine.receiveShadows = false;
+            Color primaryGreen = new Color(0.18f, 1.0f, 0.38f, 0.96f);
+            Color secondaryLime = new Color(0.65f, 1.0f, 0.25f, 0.88f);
 
-                Shader unlit = Shader.Find("Universal Render Pipeline/Unlit");
-                if (unlit == null) unlit = Shader.Find("Sprites/Default");
-                Material mat = new Material(unlit);
-                mat.color = new Color(0.2f, 1.0f, 0.35f, 0.95f);
-                _bindTetherLine.material = mat;
+            if (_bindPrimaryHelixLine == null)
+            {
+                _bindPrimaryHelixLine = CreateProceduralLine(transform, "GreenBind_PrimaryHelix", TetherSegmentCount, false, 0.042f, primaryGreen);
+            }
+            if (_bindSecondaryHelixLine == null)
+            {
+                _bindSecondaryHelixLine = CreateProceduralLine(transform, "GreenBind_SecondaryHelix", TetherSegmentCount, false, 0.026f, secondaryLime);
+            }
+            if (_bindStartAnchorRing == null)
+            {
+                _bindStartAnchorRing = CreateProceduralLine(transform, "GreenBind_StartAnchorRing", RingSegmentCount, true, 0.032f, primaryGreen);
+            }
+            if (_bindEndAnchorRing == null)
+            {
+                _bindEndAnchorRing = CreateProceduralLine(transform, "GreenBind_EndAnchorRing", RingSegmentCount, true, 0.032f, secondaryLime);
             }
 
-            _bindTetherLine.enabled = true;
+            _bindPrimaryHelixLine.enabled = true;
+            _bindSecondaryHelixLine.enabled = true;
+            _bindStartAnchorRing.enabled = true;
+            _bindEndAnchorRing.enabled = true;
+
             Vector3 attachWorld = transform.TransformPoint(_greenLocalAttachPoint);
-            _bindTetherLine.SetPosition(0, _greenBindAnchorPoint);
-            _bindTetherLine.SetPosition(1, attachWorld);
+            Vector3 targetAnchor = _connectedPartnerBody != null ? _connectedPartnerBody.worldCenterOfMass : _greenBindAnchorPoint;
+            Vector3 delta = attachWorld - targetAnchor;
+            float dist = delta.magnitude;
+            Vector3 dir = dist > 0.001f ? (delta / dist) : Vector3.up;
+
+            // Construct orthogonal basis for the dual-helix wave
+            Vector3 upRef = Mathf.Abs(Vector3.Dot(dir, Vector3.up)) > 0.9f ? Vector3.right : Vector3.up;
+            Vector3 right = Vector3.Cross(dir, upRef).normalized;
+            Vector3 up = Vector3.Cross(right, dir).normalized;
+
+            float waveAmplitude = Mathf.Clamp(dist * 0.06f, 0.035f, 0.16f);
+            float timePhase = Time.time * 15.0f;
+
+            // Expiry warning pulse in final 1.2s
+            float pulseWidth = _greenBindTimer <= 1.2f
+                ? 1f + (Mathf.Sin(Time.time * 24f) * 0.35f)
+                : 1f;
+            _bindPrimaryHelixLine.widthMultiplier = 0.042f * pulseWidth;
+            _bindSecondaryHelixLine.widthMultiplier = 0.026f * pulseWidth;
+
+            for (int i = 0; i < TetherSegmentCount; i++)
+            {
+                float t = i / (float)(TetherSegmentCount - 1);
+                Vector3 basePoint = Vector3.Lerp(targetAnchor, attachWorld, t);
+                float envelope = Mathf.Sin(t * Mathf.PI); // Pin ends cleanly at 0 and 1
+                float angle = (t * Mathf.PI * 6f) - timePhase;
+
+                Vector3 helixOffset1 = ((right * Mathf.Cos(angle)) + (up * Mathf.Sin(angle))) * (waveAmplitude * envelope);
+                Vector3 helixOffset2 = ((right * Mathf.Cos(angle + Mathf.PI)) + (up * Mathf.Sin(angle + Mathf.PI))) * (waveAmplitude * envelope);
+
+                _bindPrimaryHelixLine.SetPosition(i, basePoint + helixOffset1);
+                _bindSecondaryHelixLine.SetPosition(i, basePoint + helixOffset2);
+            }
+
+            // Rotating holographic anchor rings at both ends of the magnetic tether
+            Quaternion ringRot1 = Quaternion.LookRotation(dir) * Quaternion.Euler(0f, 0f, Time.time * 180f);
+            Quaternion ringRot2 = Quaternion.LookRotation(dir) * Quaternion.Euler(0f, 0f, -Time.time * 180f);
+            SetCirclePositions(_bindStartAnchorRing, targetAnchor, ringRot1, 0.24f);
+            SetCirclePositions(_bindEndAnchorRing, attachWorld, ringRot2, 0.24f);
         }
 
         private void ClearBindJointAndVisual()
@@ -420,9 +927,142 @@ namespace Recorded.ColorSystem
                 _activeBindJoint = null;
             }
 
-            if (_bindTetherLine != null)
+            if (_bindPrimaryHelixLine != null) _bindPrimaryHelixLine.enabled = false;
+            if (_bindSecondaryHelixLine != null) _bindSecondaryHelixLine.enabled = false;
+            if (_bindStartAnchorRing != null) _bindStartAnchorRing.enabled = false;
+            if (_bindEndAnchorRing != null) _bindEndAnchorRing.enabled = false;
+        }
+
+        private void SetChronoFieldActive(bool active)
+        {
+            if (!Application.isPlaying) return;
+
+            if (!active)
             {
-                _bindTetherLine.enabled = false;
+                if (_chronoFieldRoot != null) _chronoFieldRoot.SetActive(false);
+                return;
+            }
+
+            if (_chronoFieldRoot == null)
+            {
+                _chronoFieldRoot = new GameObject("CyanStasis_ChronoField");
+                _chronoFieldRoot.transform.SetParent(transform, false);
+                _chronoFieldRoot.transform.localPosition = Vector3.zero;
+
+                Color cyanGlow = new Color(0.15f, 0.92f, 1.0f, 0.95f);
+                Color electricBlue = new Color(0.35f, 0.65f, 1.0f, 0.85f);
+                Color arrowColor = new Color(1.0f, 0.35f, 0.2f, 0.98f);
+
+                _chronoRingXY = CreateProceduralLine(_chronoFieldRoot.transform, "ChronoGyroRing_XY", RingSegmentCount, true, 0.036f, cyanGlow);
+                _chronoRingYZ = CreateProceduralLine(_chronoFieldRoot.transform, "ChronoGyroRing_YZ", RingSegmentCount, true, 0.028f, electricBlue);
+                _chronoVectorArrowLine = CreateProceduralLine(_chronoFieldRoot.transform, "StasisMomentum_Arrow", 5, false, 0.055f, arrowColor);
+
+                _chronoPointLight = _chronoFieldRoot.AddComponent<Light>();
+                _chronoPointLight.type = LightType.Point;
+                _chronoPointLight.color = cyanGlow;
+                _chronoPointLight.range = 3.2f;
+                _chronoPointLight.intensity = 2.8f;
+            }
+
+            _chronoFieldRoot.SetActive(true);
+        }
+
+        private void UpdateChronoFieldVisuals()
+        {
+            if (!Application.isPlaying || _chronoFieldRoot == null || !_chronoFieldRoot.activeSelf) return;
+
+            Vector3 center = _rb != null ? _rb.worldCenterOfMass : transform.position;
+            float baseRadius = 0.85f;
+            Renderer rend = GetComponentInChildren<Renderer>();
+            if (rend != null)
+            {
+                baseRadius = Mathf.Clamp(rend.bounds.extents.magnitude * 1.15f, 0.65f, 2.2f);
+            }
+
+            // Counter-rotating Gyro Holo-Rings around the suspended target (leaves surface color 100% visible)
+            Quaternion rotXY = Quaternion.Euler(Time.time * 75f, Time.time * 45f, 0f);
+            Quaternion rotYZ = Quaternion.Euler(0f, -Time.time * 65f, Time.time * 85f);
+
+            // Strobe warning when Stasis is about to expire (<= 1.5s remaining)
+            float strobe = 1f;
+            if (_blueStasisTimer <= 1.5f)
+            {
+                float freq = Mathf.Lerp(22f, 8f, Mathf.Clamp01(_blueStasisTimer / 1.5f));
+                strobe = 0.45f + 0.55f * Mathf.Abs(Mathf.Sin(Time.time * freq));
+            }
+
+            _chronoRingXY.widthMultiplier = 0.038f * strobe;
+            _chronoRingYZ.widthMultiplier = 0.028f * strobe;
+
+            SetCirclePositions(_chronoRingXY, center, rotXY, baseRadius);
+            SetCirclePositions(_chronoRingYZ, center, rotYZ, baseRadius * 0.88f);
+
+            // Kinetic Momentum Launch Vector Arrow (grows and glows brighter with each stored RED hit!)
+            if (_storedStasisImpulse.sqrMagnitude > 0.05f)
+            {
+                _chronoVectorArrowLine.enabled = true;
+                Vector3 dir = _storedStasisImpulse.normalized;
+                float chargeRatio = Mathf.Clamp01(_storedStasisImpulse.magnitude / stasisMaxStoredImpulse);
+                float arrowLength = Mathf.Lerp(0.75f, 2.4f, chargeRatio);
+
+                Vector3 tip = center + (dir * arrowLength);
+                Vector3 sideRef = Mathf.Abs(Vector3.Dot(dir, Vector3.up)) > 0.9f ? Vector3.right : Vector3.up;
+                Vector3 right = Vector3.Cross(dir, sideRef).normalized;
+                Vector3 wing1 = tip - (dir * 0.35f) + (right * 0.22f);
+                Vector3 wing2 = tip - (dir * 0.35f) - (right * 0.22f);
+
+                _chronoVectorArrowLine.positionCount = 5;
+                _chronoVectorArrowLine.SetPosition(0, center);
+                _chronoVectorArrowLine.SetPosition(1, tip);
+                _chronoVectorArrowLine.SetPosition(2, wing1);
+                _chronoVectorArrowLine.SetPosition(3, tip);
+                _chronoVectorArrowLine.SetPosition(4, wing2);
+
+                Color chargeColor = Color.Lerp(new Color(1f, 0.65f, 0.15f, 1f), new Color(1f, 0.12f, 0.85f, 1f), chargeRatio);
+                if (_chronoVectorArrowLine.sharedMaterial != null)
+                {
+                    _chronoVectorArrowLine.sharedMaterial.color = chargeColor;
+                }
+            }
+            else
+            {
+                _chronoVectorArrowLine.enabled = false;
+            }
+        }
+
+        private static LineRenderer CreateProceduralLine(Transform parent, string name, int positionCount, bool loop, float width, Color color)
+        {
+            Transform existing = parent.Find(name);
+            GameObject obj = existing != null ? existing.gameObject : new GameObject(name);
+            if (existing == null)
+            {
+                obj.transform.SetParent(parent, false);
+            }
+
+            LineRenderer lr = obj.GetComponent<LineRenderer>();
+            if (lr == null) lr = obj.AddComponent<LineRenderer>();
+
+            lr.useWorldSpace = true;
+            lr.loop = loop;
+            lr.positionCount = positionCount;
+            lr.startWidth = width;
+            lr.endWidth = width;
+            lr.numCapVertices = 3;
+            lr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            lr.receiveShadows = false;
+            lr.sharedMaterial = new Material(GetUnlitShader()) { color = color };
+            return lr;
+        }
+
+        private static void SetCirclePositions(LineRenderer lr, Vector3 center, Quaternion rotation, float radius)
+        {
+            if (lr == null) return;
+            int count = lr.positionCount;
+            for (int i = 0; i < count; i++)
+            {
+                float angle = (i / (float)count) * Mathf.PI * 2f;
+                Vector3 localPos = new Vector3(Mathf.Cos(angle) * radius, Mathf.Sin(angle) * radius, 0f);
+                lr.SetPosition(i, center + (rotation * localPos));
             }
         }
 
