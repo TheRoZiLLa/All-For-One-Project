@@ -4,7 +4,7 @@ namespace Recorded.Enemies
 {
     /// <summary>Small, readable tactical prototype: observes lanes, telegraphs an intercept, then repositions.</summary>
     [RequireComponent(typeof(Rigidbody))]
-    public sealed class SurveyorEnemyAI : MonoBehaviour
+    public sealed class SurveyorEnemyAI : MonoBehaviour, IEnemyBrain
     {
         private enum Phase { Observe, Telegraph, Attack, Recover, Relocate }
 
@@ -48,6 +48,11 @@ namespace Recorded.Enemies
 
         private void Update()
         {
+            if (_dead) return;
+            if (playerTarget == null && Camera.main != null)
+                playerTarget = Camera.main.transform;
+            CloseOnTarget();
+
             if (_phase == Phase.Observe)
             {
                 _phaseTimer += Time.deltaTime;
@@ -80,6 +85,28 @@ namespace Recorded.Enemies
                 _phase = Phase.Observe;
                 _phaseTimer = 0f;
             }
+        }
+
+        private void CloseOnTarget()
+        {
+            if (_phase != Phase.Observe || _body == null || _body.isKinematic || playerTarget == null) return;
+            Vector3 to = playerTarget.position - transform.position;
+            to.y = 0f;
+            if (to.sqrMagnitude < 0.25f) return;
+            float dist = to.magnitude;
+            Vector3 dir = to / dist;
+            if (dist <= 7.5f)
+            {
+                Vector3 stopped = _body.linearVelocity;
+                stopped.x = 0f;
+                stopped.z = 0f;
+                _body.linearVelocity = stopped;
+                return;
+            }
+            Vector3 vel = dir * 6f;
+            vel.y = _body.linearVelocity.y > 0f ? 0f : _body.linearVelocity.y;
+            _body.linearVelocity = vel;
+            transform.rotation = Quaternion.LookRotation(dir);
         }
 
         private void ChoosePlan()
@@ -170,10 +197,40 @@ namespace Recorded.Enemies
 
         public void InterruptForRed()
         {
-            if (!enabled) return;
+            if (_dead || !enabled) return;
             SetTelegraph(false, Vector3.zero);
             _phase = Phase.Observe;
             _phaseTimer = 0f;
         }
+
+        public bool IsDead => _dead;
+
+        /// <summary>Ragdoll. The reactor respawns the body after the knockback reads.</summary>
+        public void Die()
+        {
+            if (_dead) return;
+            _dead = true;
+            enabled = false;
+            SetTelegraph(false, Vector3.zero);
+            var agent = GetComponent<UnityEngine.AI.NavMeshAgent>();
+            if (agent != null) agent.enabled = false;
+            if (_body != null)
+            {
+                _body.isKinematic = false;
+                _body.constraints = RigidbodyConstraints.None;
+                _body.WakeUp();
+            }
+        }
+
+        public void Revive()
+        {
+            _dead = false;
+            enabled = true;
+            _phase = Phase.Observe;
+            _phaseTimer = 0f;
+            SetTelegraph(false, Vector3.zero);
+        }
+
+        private bool _dead;
     }
 }

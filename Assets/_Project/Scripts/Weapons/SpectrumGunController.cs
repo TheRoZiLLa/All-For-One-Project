@@ -28,12 +28,15 @@ namespace Recorded.Weapons
         private static readonly int FireTrigger = Animator.StringToHash("Fire");
         private static readonly int ReloadTrigger = Animator.StringToHash("Reload");
         public bool IsReloading => _isReloading;
-        public const float ReloadRefillPoint = 0.66f;
+        public const float ReloadRefillPoint = 1.05f / 1.8f;
+        public const float ReloadInsertionStart = 0.40f;
+        public const float ReloadInsertionEnd = 0.66f;
         public bool ReloadAmmoLoaded { get; private set; }
         public float ReloadProgress => TryGetReloadState(out var state) ? Mathf.Clamp01(state.normalizedTime) : 0f;
-        public float ReloadInsertion => Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(0.40f, ReloadRefillPoint, ReloadProgress));
         public Ammo.CylinderAmmoController AmmoController => ammoController;
         public Ammo.CylinderRotationController RotationController => rotationController;
+        // Cartridges travel into the bores from normalized 0.40 to 0.66. Pauses freeze this with the clip.
+        public float ReloadInsertion => Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(ReloadInsertionStart, ReloadInsertionEnd, ReloadProgress));
         private bool _isReloading;
         private Coroutine _reloadRoutine;
 
@@ -86,8 +89,6 @@ namespace Recorded.Weapons
         {
             ResolveDependencies();
             EnsureViewmodelAndMuzzleAlignment();
-            if (transform.Find("Barrel") != null && GetComponent<RevolverReloadPresentation>() == null)
-                gameObject.AddComponent<RevolverReloadPresentation>();
 
             if (ammoController != null)
             {
@@ -209,8 +210,7 @@ namespace Recorded.Weapons
             _reloadRoutine = null;
             _isReloading = false;
             ReloadAmmoLoaded = false;
-            if (gameObject.activeInHierarchy && shotAnimator != null && shotAnimator.gameObject.activeInHierarchy
-                && shotAnimator.isActiveAndEnabled && shotAnimator.isInitialized)
+            if (shotAnimator != null && shotAnimator.isActiveAndEnabled && shotAnimator.isInitialized)
             {
                 shotAnimator.ResetTrigger(FireTrigger);
                 shotAnimator.ResetTrigger(ReloadTrigger);
@@ -303,9 +303,7 @@ namespace Recorded.Weapons
                     }
                     else if (Keyboard.current.eKey.wasPressedThisFrame)
                     {
-                        var body = GetComponentInParent<CharacterController>();
-                        var player = body != null ? body.transform : transform.root;
-                        if (!SecurityKioskEInteraction.HasInteractionFor(player)) rotationController.RotateRight();
+                        rotationController.RotateRight();
                         return;
                     }
                 }
@@ -529,14 +527,19 @@ namespace Recorded.Weapons
         }
 
         /// <summary>
-        /// Walls block the ray because they are on Default. Color is delivered only when the hit
-        /// collider is on ColorInteractable and exposes IColorTarget.
+        /// Walls on Default still stop the ray. Color is delivered when the hit is on
+        /// ColorInteractable, or when the object already carries a color target. Test props and
+        /// enemies stay on Default so their own AI and physics are left alone.
         /// </summary>
         private void DeliverColorPayload(RaycastHit hitInfo, Ammo.AmmoType firedAmmo, ObjectColorState shotColorState, Vector3 shotDir)
         {
-            if (!ColorInteractable.Is(hitInfo.collider)) return;
+            if (hitInfo.collider == null) return;
 
             IColorShotImpact[] shotImpacts = hitInfo.collider.GetComponentsInParent<IColorShotImpact>();
+            bool hasImpact = shotImpacts != null && shotImpacts.Length > 0;
+            bool hasTarget = hitInfo.collider.GetComponentInParent<IColorTarget>() != null;
+            if (!ColorInteractable.Is(hitInfo.collider) && !hasImpact && !hasTarget) return;
+
             if (shotImpacts != null)
             {
                 for (int i = 0; i < shotImpacts.Length; i++)
