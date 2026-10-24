@@ -4,22 +4,22 @@ using UnityEngine;
 namespace Recorded.Weapons.Ammo
 {
     /// <summary>
-    /// Core data controller for the 6-chamber revolver cylinder.
+    /// Core data controller for the 8-chamber revolver cylinder.
     /// Stores ammunition states independently of UI visual presentation or input bindings.
     /// Supports future ammo pickup loading and standalone test reload.
     /// </summary>
     public class CylinderAmmoController : MonoBehaviour, ICylinderAmmoProvider
     {
-        public const int CylinderCapacity = 6;
+        public const int CylinderCapacity = 8;
 
         [Header("Initial State")]
-        [Tooltip("If true, automatically loads 6 random rounds on start.")]
+        [Tooltip("If true, automatically loads 8 random rounds on start.")]
         [SerializeField] private bool autoLoadOnStart = true;
 
-        // The 6 chambers of the revolver cylinder
+        // The 8 chambers of the revolver cylinder
         [SerializeField] private AmmoType[] chambers = new AmmoType[CylinderCapacity];
 
-        // The chamber index (0..5) currently aligned with the 12 o'clock firing position
+        // The chamber index (0..7) currently aligned with the 12 o'clock firing position
         [SerializeField] private int activeChamberIndex = 0;
 
         public int ChamberCount => CylinderCapacity;
@@ -33,10 +33,22 @@ namespace Recorded.Weapons.Ammo
 
         private void Awake()
         {
+            EnsureCapacity();
+        }
+
+        private void OnValidate()
+        {
+            EnsureCapacity();
+        }
+
+        private void EnsureCapacity()
+        {
             if (chambers == null || chambers.Length != CylinderCapacity)
             {
-                chambers = new AmmoType[CylinderCapacity];
+                // Keep authored round colors when upgrading an existing cylinder.
+                Array.Resize(ref chambers, CylinderCapacity);
             }
+            activeChamberIndex = (activeChamberIndex % CylinderCapacity + CylinderCapacity) % CylinderCapacity;
         }
 
         private void Start()
@@ -48,7 +60,7 @@ namespace Recorded.Weapons.Ammo
         }
 
         /// <summary>
-        /// Returns the ammunition type at a specified chamber index (0..5).
+        /// Returns the ammunition type at a specified chamber index (0..7).
         /// </summary>
         public AmmoType GetChamberAmmo(int chamberIndex)
         {
@@ -102,7 +114,7 @@ namespace Recorded.Weapons.Ammo
         }
 
         /// <summary>
-        /// Test-only reload: Fills all 6 chambers with a randomized distribution of RED, GREEN, and CYAN.
+        /// Test-only reload: Fills all 8 chambers with a randomized distribution of RED, GREEN, and CYAN.
         /// Both color counts and chamber positions are randomized naturally.
         /// </summary>
         public void TestReloadRandom()

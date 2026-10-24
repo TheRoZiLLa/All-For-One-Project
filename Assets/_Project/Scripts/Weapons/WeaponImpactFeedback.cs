@@ -6,9 +6,9 @@ namespace Recorded.Weapons
 {
     /// <summary>
     /// Handles high-impact Sci-Fi visual feedback for Spectrum Gun shots:
-    /// - Crisp barrel-tip muzzle flash light & rotating star flare
+    /// - Crisp barrel-tip muzzle flash light & collapsing six-blade crown
     /// - Dual-layer energy beam (high-luminance inner core + animated outer helical energy sheath) + high-speed bolt
-    /// - Hollow expanding surface shockwave ring + radial energy sparks tinted 100% by ammo color
+    /// - Two hollow surface shock rings, a short star burst and world-space sparks in the fired ammo color
     ///   (never occludes the target's RGB mixed surface color!)
     /// </summary>
     public class WeaponImpactFeedback : MonoBehaviour
@@ -27,8 +27,11 @@ namespace Recorded.Weapons
         [SerializeField] private GameObject impactPrefab;
         [SerializeField] private Color impactColor = new Color(0.2f, 0.9f, 1f, 1f);
         [SerializeField] private float impactDuration = 0.28f;
+        [SerializeField] private Material energyMaterial;
 
-        private WaitForSeconds _muzzleWait;
+        private Material _burstMaterial;
+        private Mesh _muzzleMesh;
+        private float _muzzleBaseIntensity = 1f;
         private LineRenderer _tracerLine;
         private LineRenderer _outerSheathLine;
         private GameObject _projectileBolt;
@@ -47,15 +50,15 @@ namespace Recorded.Weapons
 
         private void Awake()
         {
-            _muzzleWait = new WaitForSeconds(muzzleFlashDuration);
-
             // World hits must not inherit hand-bone scale or follow the moving viewmodel.
             _worldEffects = new GameObject("WeaponWorldEffects").transform;
             UnityEngine.SceneManagement.SceneManager.MoveGameObjectToScene(_worldEffects.gameObject, gameObject.scene);
+            _burstMaterial = CreateEnergyMaterial(new Color(2.5f, 2.5f, 2.5f, 1f));
 
             InitializeTracerAndBolt();
             InitializeImpactPool();
             ResolveMuzzleLight();
+            if (muzzleLight != null) _muzzleBaseIntensity = muzzleLight.intensity;
 
             if (muzzleLight != null)
             {
@@ -97,14 +100,12 @@ namespace Recorded.Weapons
                         Collider col = _muzzleFlareVisual.GetComponent<Collider>();
                         if (col != null)
                         {
+                            col.enabled = false;
                             if (Application.isPlaying) Destroy(col);
                             else DestroyImmediate(col);
                         }
 
-                        Shader unlit = Shader.Find("Universal Render Pipeline/Unlit");
-                        if (unlit == null) unlit = Shader.Find("Sprites/Default");
-                        Material flareMat = new Material(unlit) { color = tracerColor };
-                        _ownedMaterials.Add(flareMat);
+                        Material flareMat = CreateEnergyMaterial(tracerColor);
                         _muzzleFlareRenderer = _muzzleFlareVisual.GetComponent<Renderer>();
                         if (_muzzleFlareRenderer != null)
                         {
@@ -113,16 +114,64 @@ namespace Recorded.Weapons
                             _muzzleFlareRenderer.receiveShadows = false;
                         }
                     }
+                    if (_muzzleFlareRenderer != null && !_ownedMaterials.Contains(_muzzleFlareRenderer.sharedMaterial))
+                        _muzzleFlareRenderer.sharedMaterial = CreateEnergyMaterial(tracerColor);
+                    var filter = _muzzleFlareVisual.GetComponent<MeshFilter>();
+                    if (filter != null)
+                    {
+                        if (_muzzleMesh == null) _muzzleMesh = CreateMuzzleMesh();
+                        filter.sharedMesh = _muzzleMesh;
+                        _muzzleFlareVisual.transform.localScale = Vector3.one;
+                    }
                     _muzzleFlareVisual.SetActive(false);
                 }
             }
         }
 
+        private Material CreateEnergyMaterial(Color color)
+        {
+            var shader = Shader.Find("Universal Render Pipeline/Particles/Unlit") ?? Shader.Find("Sprites/Default");
+            var material = energyMaterial != null ? new Material(energyMaterial) : new Material(shader);
+            material.SetFloat("_Surface", 1f);
+            material.SetFloat("_Blend", 2f);
+            material.SetFloat("_SrcBlend", (float)UnityEngine.Rendering.BlendMode.SrcAlpha);
+            material.SetFloat("_DstBlend", (float)UnityEngine.Rendering.BlendMode.One);
+            material.SetFloat("_SrcBlendAlpha", (float)UnityEngine.Rendering.BlendMode.One);
+            material.SetFloat("_DstBlendAlpha", (float)UnityEngine.Rendering.BlendMode.One);
+            material.SetFloat("_ZWrite", 0f);
+            material.SetFloat("_Cull", (float)UnityEngine.Rendering.CullMode.Off);
+            material.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+            material.DisableKeyword("_ALPHAPREMULTIPLY_ON");
+            material.SetOverrideTag("RenderType", "Transparent");
+            material.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+            material.color = color;
+            _ownedMaterials.Add(material);
+            return material;
+        }
+
+        private Mesh CreateMuzzleMesh()
+        {
+            var vertices = new Vector3[18];
+            var colors = new Color[18];
+            var triangles = new int[18];
+            for (int i = 0; i < 6; i++)
+            {
+                float angle = i * Mathf.PI / 3f;
+                int v = i * 3;
+                vertices[v] = Vector3.zero;
+                vertices[v + 1] = new Vector3(Mathf.Cos(angle) * 0.055f, Mathf.Sin(angle) * 0.055f, 0.035f);
+                vertices[v + 2] = Vector3.forward * 0.16f;
+                colors[v] = Color.white;
+                colors[v + 1] = colors[v + 2] = new Color(1f, 1f, 1f, 0f);
+                for (int j = 0; j < 3; j++) triangles[v + j] = v + j;
+            }
+            var mesh = new Mesh { name = "Spectrum muzzle crown", vertices = vertices, colors = colors, triangles = triangles };
+            mesh.RecalculateBounds();
+            return mesh;
+        }
+
         private void InitializeTracerAndBolt()
         {
-            Shader lineShader = Shader.Find("Universal Render Pipeline/Unlit");
-            if (lineShader == null) lineShader = Shader.Find("Sprites/Default");
-
             // 1. Inner Core Beam
             Transform existingLine = transform.Find("WeaponTracer_Line");
             GameObject tracerObj = existingLine != null ? existingLine.gameObject : new GameObject("WeaponTracer_Line");
@@ -139,8 +188,7 @@ namespace Recorded.Weapons
             _tracerLine.receiveShadows = false;
 
 
-            Material lineMat = new Material(lineShader) { color = tracerColor };
-            _ownedMaterials.Add(lineMat);
+            Material lineMat = CreateEnergyMaterial(tracerColor);
             _tracerLine.sharedMaterial = lineMat;
             _tracerLine.enabled = false;
 
@@ -157,8 +205,7 @@ namespace Recorded.Weapons
             _outerSheathLine.numCapVertices = 3;
             _outerSheathLine.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             _outerSheathLine.receiveShadows = false;
-            var sheathMaterial = new Material(lineShader) { color = tracerColor };
-            _ownedMaterials.Add(sheathMaterial);
+            var sheathMaterial = CreateEnergyMaterial(tracerColor);
             _outerSheathLine.sharedMaterial = sheathMaterial;
             _outerSheathLine.enabled = false;
 
@@ -179,8 +226,7 @@ namespace Recorded.Weapons
             Collider boltCol = _projectileBolt.GetComponent<Collider>();
             if (boltCol != null) boltCol.enabled = false;
 
-            Material boltMat = new Material(lineShader) { color = tracerColor };
-            _ownedMaterials.Add(boltMat);
+            Material boltMat = CreateEnergyMaterial(tracerColor);
             _projectileBoltRenderer = _projectileBolt.GetComponent<Renderer>();
             if (_projectileBoltRenderer != null)
             {
@@ -233,9 +279,6 @@ namespace Recorded.Weapons
                 ring = impactObj.AddComponent<LineRenderer>();
             }
 
-            Shader unlitShader = Shader.Find("Universal Render Pipeline/Unlit");
-            if (unlitShader == null) unlitShader = Shader.Find("Sprites/Default");
-
             ring.useWorldSpace = false;
             ring.loop = true;
             ring.positionCount = ImpactRingSegments;
@@ -245,8 +288,7 @@ namespace Recorded.Weapons
             ring.receiveShadows = false;
             if (ring.sharedMaterial == null)
             {
-                var ringMaterial = new Material(unlitShader) { color = impactColor };
-                _ownedMaterials.Add(ringMaterial);
+                var ringMaterial = CreateEnergyMaterial(impactColor);
                 ring.sharedMaterial = ringMaterial;
             }
 
@@ -255,6 +297,78 @@ namespace Recorded.Weapons
                 float angle = (i / (float)ImpactRingSegments) * Mathf.PI * 2f;
                 ring.SetPosition(i, new Vector3(Mathf.Cos(angle), Mathf.Sin(angle), 0f));
             }
+            var corona = CreateImpactLine(impactObj.transform, "ImpactCorona", ImpactRingSegments, 0.018f, true);
+            for (int i = 0; i < ImpactRingSegments; i++)
+            {
+                float angle = i * Mathf.PI * 2f / ImpactRingSegments;
+                corona.SetPosition(i, new Vector3(Mathf.Cos(angle) * 1.45f, Mathf.Sin(angle) * 1.45f, 0.008f));
+            }
+            var star = CreateImpactLine(impactObj.transform, "ImpactBurstStar", 25, 0.035f, false);
+            for (int i = 0; i < 12; i++)
+            {
+                float angle = i * Mathf.PI / 6f;
+                float length = i % 3 == 0 ? 1.7f : 0.85f;
+                star.SetPosition(i * 2, new Vector3(0f, 0f, 0.015f));
+                star.SetPosition(i * 2 + 1, new Vector3(Mathf.Cos(angle) * length, Mathf.Sin(angle) * length, 0.015f));
+            }
+            star.SetPosition(24, new Vector3(0f, 0f, 0.015f));
+            EnsureImpactSparks(impactObj.transform);
+        }
+
+        private LineRenderer CreateImpactLine(Transform parent, string name, int points, float width, bool loop)
+        {
+            var child = parent.Find(name);
+            if (child == null) { child = new GameObject(name).transform; child.SetParent(parent, false); }
+            var line = child.GetComponent<LineRenderer>();
+            if (line == null) line = child.gameObject.AddComponent<LineRenderer>();
+            line.useWorldSpace = false;
+            line.loop = loop;
+            line.positionCount = points;
+            line.startWidth = line.endWidth = width;
+            line.sharedMaterial = _burstMaterial;
+            line.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            line.receiveShadows = false;
+            return line;
+        }
+
+        private void EnsureImpactSparks(Transform parent)
+        {
+            var child = parent.Find("ImpactSparks");
+            if (child != null) { child.GetComponent<ParticleSystem>().Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear); return; }
+            child = new GameObject("ImpactSparks").transform;
+            child.SetParent(parent, false);
+            var sparks = child.gameObject.AddComponent<ParticleSystem>();
+            sparks.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+            var main = sparks.main;
+            main.loop = false;
+            main.playOnAwake = false;
+            main.duration = 0.4f;
+            main.startLifetime = new ParticleSystem.MinMaxCurve(0.12f, 0.34f);
+            main.startSpeed = new ParticleSystem.MinMaxCurve(3f, 7f);
+            main.startSize = new ParticleSystem.MinMaxCurve(0.012f, 0.032f);
+            main.gravityModifier = 0.7f;
+            main.maxParticles = 24;
+            main.simulationSpace = ParticleSystemSimulationSpace.World;
+            main.scalingMode = ParticleSystemScalingMode.Shape;
+            var emission = sparks.emission;
+            emission.enabled = false;
+            var shape = sparks.shape;
+            shape.shapeType = ParticleSystemShapeType.Cone;
+            shape.angle = 72f;
+            shape.radius = 0.012f;
+            var fade = new Gradient();
+            fade.SetKeys(new[] { new GradientColorKey(Color.white, 0f), new GradientColorKey(Color.white, 1f) },
+                new[] { new GradientAlphaKey(1f, 0f), new GradientAlphaKey(1f, 0.12f), new GradientAlphaKey(0f, 1f) });
+            var color = sparks.colorOverLifetime;
+            color.enabled = true;
+            color.color = fade;
+            var renderer = sparks.GetComponent<ParticleSystemRenderer>();
+            renderer.renderMode = ParticleSystemRenderMode.Stretch;
+            renderer.lengthScale = 2.5f;
+            renderer.velocityScale = 0.06f;
+            renderer.sharedMaterial = _burstMaterial;
+            renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            renderer.receiveShadows = false;
         }
 
         private GameObject CreateDefaultImpactObject()
@@ -269,7 +383,7 @@ namespace Recorded.Weapons
 
             Light impactLight = impactObj.AddComponent<Light>();
             impactLight.type = LightType.Point;
-            impactLight.range = 4.2f;
+            impactLight.range = 2.5f;
             impactLight.color = impactColor;
             impactLight.intensity = 5.5f;
 
@@ -297,7 +411,7 @@ namespace Recorded.Weapons
             if (!Application.isPlaying || !isActiveAndEnabled) return;
 
             if (muzzleLight != null) muzzleLight.color = tracerColor;
-            if (_muzzleFlareRenderer != null) _muzzleFlareRenderer.sharedMaterial.color = tracerColor;
+            if (_muzzleFlareRenderer != null) _muzzleFlareRenderer.sharedMaterial.color = Color.Lerp(tracerColor, Color.white, 0.25f) * new Color(2f, 2f, 2f, 1f);
             if (_muzzleCoroutine != null) StopCoroutine(_muzzleCoroutine);
             _muzzleCoroutine = StartCoroutine(MuzzleFlashRoutine());
         }
@@ -311,9 +425,18 @@ namespace Recorded.Weapons
                 _muzzleFlareVisual.SetActive(true);
             }
 
-            yield return _muzzleWait;
+            float elapsed = 0f, duration = Mathf.Max(0.02f, muzzleFlashDuration);
+            while (elapsed < duration)
+            {
+                float t = elapsed / duration;
+                if (muzzleLight != null) muzzleLight.intensity = Mathf.Lerp(Mathf.Max(8f, _muzzleBaseIntensity), 0f, t * t);
+                if (_muzzleFlareVisual != null) _muzzleFlareVisual.transform.localScale = Vector3.one * Mathf.Lerp(1.15f, 0.25f, t);
+                yield return null;
+                elapsed += Time.deltaTime;
+            }
 
             if (muzzleLight != null) muzzleLight.enabled = false;
+            if (muzzleLight != null) muzzleLight.intensity = _muzzleBaseIntensity;
             if (_muzzleFlareVisual != null) _muzzleFlareVisual.SetActive(false);
             _muzzleCoroutine = null;
         }
@@ -325,7 +448,7 @@ namespace Recorded.Weapons
 
             _tracerLine.sharedMaterial.color = tracerColor;
             if (_outerSheathLine != null) _outerSheathLine.sharedMaterial.color = tracerColor;
-            if (_projectileBoltRenderer != null) _projectileBoltRenderer.sharedMaterial.color = tracerColor;
+            if (_projectileBoltRenderer != null) _projectileBoltRenderer.sharedMaterial.color = tracerColor * new Color(3f, 3f, 3f, 1f);
             if (_tracerCoroutine != null) StopCoroutine(_tracerCoroutine);
             _tracerCoroutine = StartCoroutine(TracerRoutine(from, to));
         }
@@ -348,6 +471,7 @@ namespace Recorded.Weapons
 
             if (_outerSheathLine != null)
             {
+                _outerSheathLine.widthMultiplier = 1f;
                 _outerSheathLine.enabled = true;
             }
 
@@ -363,14 +487,13 @@ namespace Recorded.Weapons
 
             while (elapsed < duration)
             {
-                elapsed += Time.deltaTime;
                 float t = Mathf.Clamp01(elapsed / duration);
 
                 // Animate spiral energy sheath around the main laser core
                 if (_outerSheathLine != null)
                 {
                     float phase = elapsed * 45f;
-                    float spiralRadius = Mathf.Lerp(0.045f, 0.005f, t);
+                    float spiralRadius = Mathf.Lerp(0.022f, 0.002f, t);
                     for (int i = 0; i < SheathSegments; i++)
                     {
                         float st = i / (float)(SheathSegments - 1);
@@ -385,7 +508,8 @@ namespace Recorded.Weapons
 
                 if (_projectileBolt != null)
                 {
-                    float boltTravel = Mathf.Clamp01((elapsed * projectileBoltSpeed) / Mathf.Max(0.5f, dist));
+                    float travelTime = Mathf.Clamp(dist / Mathf.Max(1f, projectileBoltSpeed), 0.015f, duration * 0.75f);
+                    float boltTravel = Mathf.Clamp01(elapsed / travelTime);
                     _projectileBolt.transform.position = Vector3.Lerp(from, to, boltTravel);
                     if (boltTravel >= 1f)
                     {
@@ -396,8 +520,12 @@ namespace Recorded.Weapons
                 float widthScale = 1f - (t * 0.78f);
                 _tracerLine.startWidth = tracerWidth * widthScale;
                 _tracerLine.endWidth = tracerWidth * 0.45f * widthScale;
+                float alpha = (1f - t) * (1f - t);
+                _tracerLine.startColor = _tracerLine.endColor = new Color(3.5f, 3.5f, 3.5f, alpha);
+                if (_outerSheathLine != null) _outerSheathLine.startColor = _outerSheathLine.endColor = new Color(1.5f, 1.5f, 1.5f, alpha * 0.65f);
 
                 yield return null;
+                elapsed += Time.deltaTime;
             }
 
             if (_projectileBolt != null) _projectileBolt.SetActive(false);
@@ -411,6 +539,7 @@ namespace Recorded.Weapons
             if (!Application.isPlaying || !isActiveAndEnabled) return;
 
             GameObject impactObj = _impactPool.Count > 0 ? _impactPool.Dequeue() : CreateDefaultImpactObject();
+            impactObj.transform.localScale = Vector3.one;
             impactObj.transform.position = point + (normal * 0.03f);
             if (normal.sqrMagnitude > 0.001f)
             {
@@ -421,7 +550,7 @@ namespace Recorded.Weapons
             if (l != null)
             {
                 l.color = impactColor;
-                l.intensity = 5.5f;
+                l.intensity = 8f;
             }
 
             LineRenderer ring = impactObj.GetComponent<LineRenderer>();
@@ -431,34 +560,54 @@ namespace Recorded.Weapons
             }
 
             impactObj.SetActive(true);
+            var star = impactObj.transform.Find("ImpactBurstStar")?.GetComponent<LineRenderer>();
+            var corona = impactObj.transform.Find("ImpactCorona")?.GetComponent<LineRenderer>();
+            if (star != null) { star.enabled = true; star.startColor = star.endColor = Color.Lerp(impactColor, Color.white, 0.65f); }
+            if (corona != null) corona.startColor = corona.endColor = impactColor;
+            var sparks = impactObj.transform.Find("ImpactSparks")?.GetComponent<ParticleSystem>();
+            if (sparks != null)
+            {
+                sparks.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+                sparks.Play();
+                sparks.Emit(new ParticleSystem.EmitParams { startColor = impactColor }, 14);
+            }
             StartCoroutine(RecycleImpactRoutine(impactObj, ring, l));
         }
 
         private IEnumerator RecycleImpactRoutine(GameObject impactObj, LineRenderer ring, Light impactLight)
         {
             float elapsed = 0f;
+            var corona = impactObj.transform.Find("ImpactCorona")?.GetComponent<LineRenderer>();
+            var star = impactObj.transform.Find("ImpactBurstStar")?.GetComponent<LineRenderer>();
+            var sparks = impactObj.transform.Find("ImpactSparks")?.GetComponent<ParticleSystem>();
+            Color starColor = star != null ? star.startColor : Color.white;
+            Color coronaColor = corona != null ? corona.startColor : Color.white;
 
             while (elapsed < impactDuration)
             {
-                elapsed += Time.deltaTime;
                 float t = Mathf.Clamp01(elapsed / impactDuration);
                 float easeOut = 1f - Mathf.Pow(1f - t, 3f);
 
                 // Expand hollow shock ring outward so the target's RGB surface color remains 100% visible in the center
-                float radius = Mathf.Lerp(0.08f, 0.65f, easeOut);
+                float radius = Mathf.Lerp(0.06f, 0.5f, easeOut);
                 impactObj.transform.localScale = new Vector3(radius, radius, 1f);
 
                 if (ring != null)
                 {
                     ring.widthMultiplier = Mathf.Lerp(1.0f, 0.1f, t);
+                    ring.startColor = ring.endColor = new Color(1.6f, 1.6f, 1.6f, (1f - t) * (1f - t));
                 }
+                if (corona != null) { coronaColor.a = (1f - t) * 0.6f; corona.startColor = corona.endColor = coronaColor; }
+                if (star != null) { star.enabled = elapsed < 0.075f; starColor.a = 1f - Mathf.Clamp01(elapsed / 0.075f); star.startColor = star.endColor = starColor; }
                 if (impactLight != null)
                 {
-                    impactLight.intensity = Mathf.Lerp(5.5f, 0f, t);
+                    impactLight.intensity = 8f * Mathf.Exp(-elapsed * 35f);
                 }
                 yield return null;
+                elapsed += Time.deltaTime;
             }
 
+            if (sparks != null) sparks.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
             impactObj.SetActive(false);
             _impactPool.Enqueue(impactObj);
         }
@@ -466,6 +615,7 @@ namespace Recorded.Weapons
         public void SetMuzzleLight(Light light)
         {
             muzzleLight = light;
+            if (muzzleLight != null) _muzzleBaseIntensity = muzzleLight.intensity;
             if (muzzleLight != null)
             {
                 muzzleLight.color = tracerColor;
@@ -484,6 +634,7 @@ namespace Recorded.Weapons
             StopAllCoroutines();
             _muzzleCoroutine = _tracerCoroutine = null;
             if (muzzleLight != null) muzzleLight.enabled = false;
+            if (muzzleLight != null) muzzleLight.intensity = _muzzleBaseIntensity;
             if (_muzzleFlareVisual != null) _muzzleFlareVisual.SetActive(false);
             if (_tracerLine != null) _tracerLine.enabled = false;
             if (_outerSheathLine != null) _outerSheathLine.enabled = false;
@@ -494,6 +645,7 @@ namespace Recorded.Weapons
         private void OnDestroy()
         {
             if (_worldEffects != null) Destroy(_worldEffects.gameObject);
+            if (_muzzleMesh != null) Destroy(_muzzleMesh);
             foreach (var material in _ownedMaterials) if (material != null) Destroy(material);
         }
     }

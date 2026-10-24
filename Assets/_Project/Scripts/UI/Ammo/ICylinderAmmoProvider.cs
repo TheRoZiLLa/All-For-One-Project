@@ -8,10 +8,10 @@ namespace Recorded.Weapons.Ammo
     /// </summary>
     public interface ICylinderAmmoProvider
     {
-        /// <summary>Number of chambers in the cylinder (6).</summary>
+        /// <summary>Number of chambers in the cylinder (8).</summary>
         int ChamberCount { get; }
 
-        /// <summary>Index (0..5) of the chamber currently aligned with the fixed 12 o'clock firing position.</summary>
+        /// <summary>Index (0..7) of the chamber currently aligned with the fixed 12 o'clock firing position.</summary>
         int ActiveChamberIndex { get; }
 
         /// <summary>The ammunition type present in the active 12 o'clock chamber.</summary>

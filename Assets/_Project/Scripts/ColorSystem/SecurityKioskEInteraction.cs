@@ -13,6 +13,19 @@ namespace Recorded.ColorSystem
 
         private readonly HashSet<Collider> _nearbyPlayerColliders = new HashSet<Collider>();
 
+        public static bool HasInteractionFor(Transform player)
+        {
+            if (player == null) return false;
+            foreach (var kiosk in FindObjectsByType<SecurityKioskEInteraction>(FindObjectsSortMode.None))
+            {
+                if (!kiosk.isActiveAndEnabled || kiosk.airlockGate == null) continue;
+                foreach (var collider in kiosk._nearbyPlayerColliders)
+                    if (collider != null && collider.enabled && collider.gameObject.activeInHierarchy && collider.transform.IsChildOf(player))
+                        return true;
+            }
+            return false;
+        }
+
         private void Awake()
         {
             if (!GetComponent<Collider>().isTrigger)

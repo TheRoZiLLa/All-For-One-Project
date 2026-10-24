@@ -5,7 +5,7 @@ using UnityEngine.UI;
 namespace Recorded.Weapons.Ammo
 {
     /// <summary>
-    /// Renders the 2D six-chamber revolver ammunition HUD at the bottom-left of the screen.
+    /// Renders the 2D eight-chamber revolver ammunition HUD at the bottom-left of the screen.
     /// Displays the rear face of the cylinder viewed from the shooter's perspective.
     /// Features industrial brushed gunmetal framing, recessed fluted chambers, brass/metallic
     /// cartridge primers, and a precision 12 o'clock firing chamber bracket & chevron indicator.
@@ -38,7 +38,7 @@ namespace Recorded.Weapons.Ammo
         [SerializeField] private Color cartridgeBaseColor = new Color(0.46f, 0.50f, 0.56f, 1f);
         [SerializeField] private Color indicatorColor = new Color(0.22f, 0.92f, 1f, 1f);
 
-        // Visual references for the 6 chambers
+        // Visual references for the 8 chambers
         private struct ChamberUI
         {
             public GameObject root;
@@ -47,6 +47,10 @@ namespace Recorded.Weapons.Ammo
             public Image cartridgeBaseImage;
             public Image colorCapImage;
             public Image primerGlowImage;
+            public CanvasGroup cartridgeGroup;
+            public Color targetColor;
+            public float targetAlpha;
+            public bool colorInitialized;
         }
 
         private ChamberUI[] _chamberVisuals = new ChamberUI[CylinderAmmoController.CylinderCapacity];
@@ -54,14 +58,15 @@ namespace Recorded.Weapons.Ammo
         private RectTransform _innerCylinderRect;
         private Image _activeBracketRingImage;
         private Image _activeChevronImage;
-        private float _indicatorPulse;
+        private RevolverReloadPresentation _cylinderPresentation;
         private Transform _weaponCylinder;
         private Vector3 _closedCylinderCenter;
         private Vector3 _cylinderMeshCenter;
         private Quaternion _closedCylinderRotation;
         private float _cylinderRadius;
-        private bool _wasReloading, _hideReloadRounds;
+        private bool _wasReloading;
         private float _reloadSpin, _previousSpin;
+        private Color _indicatorTarget;
 
         public RectTransform InnerCylinderRect => _innerCylinderRect;
 
@@ -106,12 +111,19 @@ namespace Recorded.Weapons.Ammo
 
         private void Update()
         {
-            // A restrained unscaled pulse improves scanability without moving the fixed 12 o'clock marker.
             if (_activeBracketRingImage == null) return;
-            _indicatorPulse = Mathf.Lerp(_indicatorPulse, 0f, Time.unscaledDeltaTime * 7f);
-            float breathe = 1f + Mathf.Sin(Time.unscaledTime * 4.5f) * 0.035f + _indicatorPulse * 0.10f;
-            _activeBracketRingImage.rectTransform.localScale = Vector3.one * breathe;
-            if (_activeChevronImage != null) _activeChevronImage.rectTransform.localScale = Vector3.one * (1f + _indicatorPulse * 0.08f);
+            float blend = 1f - Mathf.Exp(-Time.unscaledDeltaTime * 18f);
+            _activeBracketRingImage.color = Color.Lerp(_activeBracketRingImage.color, _indicatorTarget, blend);
+            if (_activeChevronImage != null) _activeChevronImage.color = _activeBracketRingImage.color;
+            foreach (var chamber in _chamberVisuals)
+            {
+                if (chamber.colorCapImage == null) continue;
+                chamber.colorCapImage.color = Color.Lerp(chamber.colorCapImage.color, chamber.targetColor, blend);
+                var cap = chamber.colorCapImage.color;
+                if (chamber.primerGlowImage != null) chamber.primerGlowImage.color = new Color(cap.r, cap.g, cap.b, 0.65f);
+                if (weaponController == null || !weaponController.IsReloading || _weaponCylinder == null)
+                    chamber.cartridgeGroup.alpha = Mathf.Lerp(chamber.cartridgeGroup.alpha, chamber.targetAlpha, blend);
+            }
         }
 
         private void ResolveControllers()
@@ -128,6 +140,8 @@ namespace Recorded.Weapons.Ammo
                 if (rotationController == null) rotationController = FindFirstObjectByType<CylinderRotationController>();
             }
             if (weaponController == null) weaponController = FindFirstObjectByType<SpectrumGunController>();
+            if (_cylinderPresentation == null && weaponController != null)
+                _cylinderPresentation = weaponController.GetComponent<RevolverReloadPresentation>();
             if (_weaponCylinder == null && weaponController != null)
             {
                 var cylinder = weaponController.transform.Find("Barrel") ?? weaponController.transform.Find("RevolverModel/Barrel");
@@ -161,41 +175,45 @@ namespace Recorded.Weapons.Ammo
             // The crane's arc contributes half its swing angle to the center's displacement direction.
             float swing = offset.sqrMagnitude > 0.0000000001f
                 ? Mathf.DeltaAngle(0f, 2f * Mathf.Atan2(-offset.y, offset.z) * Mathf.Rad2Deg) : 0f;
-            float rawSpin = 2f * Mathf.Atan2(rotation.x, rotation.w) * Mathf.Rad2Deg - swing;
+            float rawSpin = 2f * Mathf.Atan2(rotation.x, rotation.w) * Mathf.Rad2Deg - swing
+                - (_cylinderPresentation != null ? _cylinderPresentation.CylinderIndexAngle : 0f);
             _reloadSpin += Mathf.DeltaAngle(_previousSpin, rawSpin);
             _previousSpin = rawSpin;
             if (rotationController != null) rotationController.SetReloadVisualAngle(_reloadSpin);
             float radius = _innerCylinderRect.sizeDelta.x * 0.5f;
             _innerCylinderRect.anchoredPosition = new Vector2(-offset.z, offset.y) / _cylinderRadius * (radius * 0.65f);
 
-            bool hideRounds = !weaponController.ReloadAmmoLoaded && offset.magnitude > _cylinderRadius * 0.25f;
-            if (_hideReloadRounds != hideRounds)
-            {
-                _hideReloadRounds = hideRounds;
-                RefreshAllChambers();
-            }
-            float insertion = weaponController.ReloadAmmoLoaded
-                ? 1f + 0.12f * (1f - Mathf.SmoothStep(0f, 1f, Mathf.Clamp01((weaponController.ReloadProgress - SpectrumGunController.ReloadRefillPoint) * 10f))) : 1f;
+            float progress = weaponController.ReloadProgress;
+            float eject = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(0.12f, 0.25f, progress));
+            float refill = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(SpectrumGunController.ReloadRefillPoint, 0.78f, progress));
             foreach (var chamber in _chamberVisuals)
-                if (chamber.cartridgeBaseImage != null) chamber.cartridgeBaseImage.transform.localScale = Vector3.one * insertion;
+            {
+                if (chamber.cartridgeBaseImage == null) continue;
+                chamber.cartridgeGroup.alpha = chamber.targetAlpha * (weaponController.ReloadAmmoLoaded ? refill : 1f - eject);
+            }
             UpdateActiveIndicatorTint();
         }
 
         private void ResetReloadVisuals()
         {
             if (!_wasReloading) return;
-            _wasReloading = _hideReloadRounds = false;
+            _wasReloading = false;
             if (_innerCylinderRect != null) _innerCylinderRect.anchoredPosition = Vector2.zero;
             if (rotationController != null) rotationController.SetReloadVisualAngle(0f);
             foreach (var chamber in _chamberVisuals)
-                if (chamber.cartridgeBaseImage != null) chamber.cartridgeBaseImage.transform.localScale = Vector3.one;
+                if (chamber.cartridgeBaseImage != null)
+                {
+                    chamber.cartridgeBaseImage.transform.localScale = Vector3.one;
+                    chamber.cartridgeBaseImage.rectTransform.anchoredPosition = Vector2.zero;
+                    if (chamber.cartridgeGroup != null) chamber.cartridgeGroup.alpha = chamber.targetAlpha;
+                }
             RefreshAllChambers();
         }
 
         /// <summary>
         /// Constructs the layered uGUI hierarchy:
         /// 1. Stationary Outer Housing & Precision 12 o'clock Firing Chamber Bracket.
-        /// 2. Rotating Inner Cylinder with 6 Chamber slots, Fluted Notches, and Center Ratchet Hub.
+        /// 2. Rotating Inner Cylinder with 8 Chamber slots, Fluted Notches, and Center Ratchet Hub.
         /// </summary>
         public void BuildHUDHierarchy()
         {
@@ -341,13 +359,13 @@ namespace Recorded.Weapons.Ammo
             innerBg.color = innerCylinderColor;
             innerBg.raycastTarget = false;
 
-            // Build 6 decorative exterior flutes between chambers (at 30°, 90°, 150°, 210°, 270°, 330°)
+            // Build eight decorative exterior flutes between chambers
             // so rotation is visually unmistakable even when all chambers hold the same ammo color!
             float fluteRadius = hudDiameter * 0.37f;
             float fluteSize = hudDiameter * 0.11f;
             for (int f = 0; f < CylinderAmmoController.CylinderCapacity; f++)
             {
-                float fluteAngleDeg = 30f + (f * 60f);
+                float fluteAngleDeg = (f + 0.5f) * CylinderRotationController.ChamberAngleStep;
                 float fluteRad = fluteAngleDeg * Mathf.Deg2Rad;
                 Vector2 flutePos = new Vector2(Mathf.Sin(fluteRad) * fluteRadius, Mathf.Cos(fluteRad) * fluteRadius);
 
@@ -365,18 +383,18 @@ namespace Recorded.Weapons.Ammo
                 fluteImg.raycastTarget = false;
             }
 
-            // Build the 6 Chambers around the cylinder
+            // Build the 8 Chambers around the cylinder
             // Positioned at radius 0.255 * hudDiameter so the top chamber sits cleanly inside the housing
             // with plenty of room for the 12 o'clock active firing bracket and chevron above it.
             float chamberRadius = hudDiameter * 0.255f;
-            float chamberSize = hudDiameter * 0.225f;
+            float chamberSize = hudDiameter * 0.18f;
 
-            // 6 Chambers: Chamber 0 starts at 0 deg (12 o'clock top, aligned with the revolver barrel)
+            // 8 Chambers: Chamber 0 starts at 0 deg (12 o'clock top, aligned with the revolver barrel)
             // Subsequent chambers are indexed clockwise from the shooter's rear view:
-            // Index 0 = 0° (12 o'clock), 1 = 60° (2 o'clock), 2 = 120° (4 o'clock), 3 = 180° (12 o'clock), 4 = 240° (8 o'clock), 5 = 300° (10 o'clock)
+            // Each chamber is 45 degrees clockwise from the previous one.
             for (int i = 0; i < CylinderAmmoController.CylinderCapacity; i++)
             {
-                float angleDeg = i * 60f;
+                float angleDeg = i * CylinderRotationController.ChamberAngleStep;
                 float rad = angleDeg * Mathf.Deg2Rad;
                 Vector2 pos = new Vector2(Mathf.Sin(rad) * chamberRadius, Mathf.Cos(rad) * chamberRadius);
 
@@ -398,7 +416,7 @@ namespace Recorded.Weapons.Ammo
             hubImg.raycastTarget = false;
 
             // Ratchet Star / Spokes on Center Hub so rotation is also visible at the center axis
-            for (int s = 0; s < 3; s++)
+            for (int s = 0; s < CylinderAmmoController.CylinderCapacity / 2; s++)
             {
                 GameObject spokeObj = new GameObject($"Hub_Spoke_{s}");
                 spokeObj.transform.SetParent(hubObj.transform, false);
@@ -406,7 +424,7 @@ namespace Recorded.Weapons.Ammo
                 spokeRt.anchorMin = new Vector2(0.5f, 0.5f);
                 spokeRt.anchorMax = new Vector2(0.5f, 0.5f);
                 spokeRt.sizeDelta = new Vector2(hudDiameter * 0.16f, 3f);
-                spokeRt.localRotation = Quaternion.Euler(0f, 0f, s * 60f);
+                spokeRt.localRotation = Quaternion.Euler(0f, 0f, s * CylinderRotationController.ChamberAngleStep);
 
                 Image spokeImg = spokeObj.AddComponent<Image>();
                 spokeImg.color = new Color(0.14f, 0.16f, 0.20f, 0.95f);
@@ -469,6 +487,7 @@ namespace Recorded.Weapons.Ammo
             baseRt.sizeDelta = new Vector2(-4f, -4f);
 
             chamber.cartridgeBaseImage = baseObj.AddComponent<Image>();
+            chamber.cartridgeGroup = baseObj.AddComponent<CanvasGroup>();
             chamber.cartridgeBaseImage.sprite = CylinderUISpriteFactory.CircleFilled;
             chamber.cartridgeBaseImage.color = cartridgeBaseColor;
             chamber.cartridgeBaseImage.raycastTarget = false;
@@ -505,7 +524,7 @@ namespace Recorded.Weapons.Ammo
         private void BuildStationaryFiringIndicator(RectTransform parent)
         {
             float chamberRadius = hudDiameter * 0.255f;
-            float bracketSize = hudDiameter * 0.265f;
+            float bracketSize = hudDiameter * 0.215f;
 
             // 1. Stationary 12 O'Clock Active Chamber Reticle Ring (frames the top chamber at (0, +chamberRadius))
             GameObject bracketObj = new GameObject("Stationary_12oclock_ChamberBracket");
@@ -550,7 +569,6 @@ namespace Recorded.Weapons.Ammo
 
         private void HandleActiveChamberChanged(int activeIndex)
         {
-            _indicatorPulse = 1f;
             UpdateActiveIndicatorTint();
         }
 
@@ -575,11 +593,12 @@ namespace Recorded.Weapons.Ammo
                 : GetAmmoColor(activeAmmo);
             if (weaponController != null && weaponController.IsReloading) tint.a *= 0.3f;
 
-            if (_activeBracketRingImage != null)
+            _indicatorTarget = tint;
+            if (!Application.isPlaying && _activeBracketRingImage != null)
             {
                 _activeBracketRingImage.color = tint;
             }
-            if (_activeChevronImage != null)
+            if (!Application.isPlaying && _activeChevronImage != null)
             {
                 _activeChevronImage.color = tint;
             }
@@ -589,29 +608,23 @@ namespace Recorded.Weapons.Ammo
         {
             if (index < 0 || index >= _chamberVisuals.Length) return;
 
-            ChamberUI chamber = _chamberVisuals[index];
+            ref ChamberUI chamber = ref _chamberVisuals[index];
             if (chamber.root == null) return;
-            if (_hideReloadRounds) ammo = AmmoType.Empty;
-
-            if (ammo == AmmoType.Empty)
+            chamber.emptyHollowImage.gameObject.SetActive(true);
+            chamber.cartridgeBaseImage.gameObject.SetActive(true);
+            chamber.targetAlpha = ammo == AmmoType.Empty ? 0f : 1f;
+            if (ammo != AmmoType.Empty)
             {
-                // Show dark hollow recess, hide cartridge base and color
-                chamber.emptyHollowImage.gameObject.SetActive(true);
-                chamber.cartridgeBaseImage.gameObject.SetActive(false);
-            }
-            else
-            {
-                // Show cartridge base and set color cap
-                chamber.emptyHollowImage.gameObject.SetActive(false);
-                chamber.cartridgeBaseImage.gameObject.SetActive(true);
-
                 Color capColor = GetAmmoColor(ammo);
-                chamber.colorCapImage.color = capColor;
-                if (chamber.primerGlowImage != null)
+                chamber.targetColor = capColor;
+                if (!chamber.colorInitialized || !Application.isPlaying) chamber.colorCapImage.color = capColor;
+                if ((!chamber.colorInitialized || !Application.isPlaying) && chamber.primerGlowImage != null)
                 {
                     chamber.primerGlowImage.color = new Color(capColor.r, capColor.g, capColor.b, 0.65f);
                 }
             }
+            if (!chamber.colorInitialized || !Application.isPlaying) chamber.cartridgeGroup.alpha = chamber.targetAlpha;
+            chamber.colorInitialized = true;
         }
 
         public Color GetAmmoColor(AmmoType type)
