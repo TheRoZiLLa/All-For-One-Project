@@ -24,6 +24,70 @@ namespace Recorded.Weapons
         public static readonly Vector3 DefaultMuzzleLocalPosition = new Vector3(0.01f, 0.045f, 0.065f);
         public static readonly Vector3 DefaultChamberGlowLocalPosition = new Vector3(0.01f, 0.035f, -0.02f);
 
+        public static bool TryConfigureHeldRevolver(Camera camera)
+        {
+            if (camera == null) return false;
+            Transform rev = camera.transform.Find("Viewmodel/Arms/upper_arm.R/forearm.R/hand.R/REV");
+            if (rev == null) return false;
+            var body = rev.Find("Body")?.GetComponent<MeshFilter>();
+            var cylinder = rev.Find("Barrel")?.GetComponent<MeshFilter>();
+            if (body == null || body.sharedMesh == null || cylinder == null || cylinder.sharedMesh == null)
+                throw new System.InvalidOperationException("Held REV needs its original Body and Barrel meshes.");
+
+            Transform muzzle = rev.Find("MuzzlePoint");
+            if (muzzle == null)
+            {
+                muzzle = new GameObject("MuzzlePoint").transform;
+                muzzle.SetParent(rev, false);
+            }
+            // REV's bore points along mesh +X; Body contains the front bore, Barrel is the cylinder.
+            Vector3 bore = new Vector3(body.sharedMesh.bounds.max.x, 0.00503f, 0f);
+            muzzle.position = body.transform.TransformPoint(bore) + body.transform.right * 0.005f;
+            muzzle.rotation = Quaternion.LookRotation(body.transform.right, body.transform.up);
+            Vector3 scale = rev.lossyScale;
+            muzzle.localScale = new Vector3(1f / scale.x, 1f / scale.y, 1f / scale.z);
+            muzzle.gameObject.layer = rev.gameObject.layer;
+            Light flash = muzzle.GetComponent<Light>();
+            if (flash == null) flash = muzzle.gameObject.AddComponent<Light>();
+            flash.type = LightType.Point;
+            flash.range = 2.5f;
+            flash.intensity = 3.5f;
+            flash.shadows = LightShadows.None;
+            flash.enabled = false;
+
+            Transform glow = rev.Find("ChamberGlow");
+            if (glow == null)
+            {
+                glow = new GameObject("ChamberGlow").transform;
+                glow.SetParent(rev, false);
+                glow.position = cylinder.transform.TransformPoint(cylinder.sharedMesh.bounds.center);
+                glow.localScale = muzzle.localScale;
+            }
+            glow.gameObject.layer = rev.gameObject.layer;
+            Light chamber = glow.GetComponent<Light>();
+            if (chamber == null)
+            {
+                chamber = glow.gameObject.AddComponent<Light>();
+                chamber.type = LightType.Point;
+                chamber.range = 0.35f;
+                chamber.intensity = 1.5f;
+                chamber.shadows = LightShadows.None;
+            }
+
+            var raycast = rev.GetComponent<RaycastWeapon>();
+            if (raycast == null) raycast = rev.gameObject.AddComponent<RaycastWeapon>();
+            raycast.SetCamera(camera);
+            raycast.SetMuzzlePoint(muzzle);
+            raycast.HitLayers &= ~(1 << rev.gameObject.layer);
+            var feedback = rev.GetComponent<WeaponImpactFeedback>();
+            if (feedback == null) feedback = rev.gameObject.AddComponent<WeaponImpactFeedback>();
+            feedback.SetMuzzleLight(flash);
+            var controller = rev.GetComponent<SpectrumGunController>();
+            if (controller == null) controller = rev.gameObject.AddComponent<SpectrumGunController>();
+            controller.ResolveDependencies();
+            return true;
+        }
+
         public static GameObject BuildRevolver(Transform parent, out Transform muzzlePoint, out Light muzzleLight)
         {
             // 1. Remove old primitive cube mockup if present

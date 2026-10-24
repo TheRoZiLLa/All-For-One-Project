@@ -37,6 +37,8 @@ namespace Recorded.Weapons
         private Renderer _muzzleFlareRenderer;
         private Coroutine _muzzleCoroutine;
         private Coroutine _tracerCoroutine;
+        private Transform _worldEffects;
+        private readonly List<Material> _ownedMaterials = new List<Material>();
 
         private readonly Queue<GameObject> _impactPool = new Queue<GameObject>();
         private const int InitialPoolSize = 8;
@@ -46,6 +48,10 @@ namespace Recorded.Weapons
         private void Awake()
         {
             _muzzleWait = new WaitForSeconds(muzzleFlashDuration);
+
+            // World hits must not inherit hand-bone scale or follow the moving viewmodel.
+            _worldEffects = new GameObject("WeaponWorldEffects").transform;
+            UnityEngine.SceneManagement.SceneManager.MoveGameObjectToScene(_worldEffects.gameObject, gameObject.scene);
 
             InitializeTracerAndBolt();
             InitializeImpactPool();
@@ -83,6 +89,7 @@ namespace Recorded.Weapons
                     {
                         _muzzleFlareVisual = GameObject.CreatePrimitive(PrimitiveType.Sphere);
                         _muzzleFlareVisual.name = "MuzzleFlare_Visual";
+                        _muzzleFlareVisual.layer = mp.gameObject.layer;
                         _muzzleFlareVisual.transform.SetParent(mp, false);
                         _muzzleFlareVisual.transform.localPosition = Vector3.zero;
                         _muzzleFlareVisual.transform.localScale = new Vector3(0.042f, 0.042f, 0.075f);
@@ -97,6 +104,7 @@ namespace Recorded.Weapons
                         Shader unlit = Shader.Find("Universal Render Pipeline/Unlit");
                         if (unlit == null) unlit = Shader.Find("Sprites/Default");
                         Material flareMat = new Material(unlit) { color = tracerColor };
+                        _ownedMaterials.Add(flareMat);
                         _muzzleFlareRenderer = _muzzleFlareVisual.GetComponent<Renderer>();
                         if (_muzzleFlareRenderer != null)
                         {
@@ -118,10 +126,7 @@ namespace Recorded.Weapons
             // 1. Inner Core Beam
             Transform existingLine = transform.Find("WeaponTracer_Line");
             GameObject tracerObj = existingLine != null ? existingLine.gameObject : new GameObject("WeaponTracer_Line");
-            if (existingLine == null)
-            {
-                tracerObj.transform.SetParent(transform, false);
-            }
+            tracerObj.transform.SetParent(_worldEffects, false);
 
             _tracerLine = tracerObj.GetComponent<LineRenderer>();
             if (_tracerLine == null) _tracerLine = tracerObj.AddComponent<LineRenderer>();
@@ -132,17 +137,17 @@ namespace Recorded.Weapons
             _tracerLine.numCapVertices = 4;
             _tracerLine.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             _tracerLine.receiveShadows = false;
-            _tracerLine.sharedMaterial = new Material(lineShader) { color = tracerColor };
+
+
+            Material lineMat = new Material(lineShader) { color = tracerColor };
+            _ownedMaterials.Add(lineMat);
+            _tracerLine.sharedMaterial = lineMat;
             _tracerLine.enabled = false;
 
             // 2. Outer Helical Energy Sheath
             Transform existingSheath = transform.Find("WeaponTracer_HelixSheath");
             GameObject sheathObj = existingSheath != null ? existingSheath.gameObject : new GameObject("WeaponTracer_HelixSheath");
-            if (existingSheath == null)
-            {
-                sheathObj.transform.SetParent(transform, false);
-            }
-
+            sheathObj.transform.SetParent(_worldEffects, false);
             _outerSheathLine = sheathObj.GetComponent<LineRenderer>();
             if (_outerSheathLine == null) _outerSheathLine = sheathObj.AddComponent<LineRenderer>();
             _outerSheathLine.startWidth = tracerWidth * 0.55f;
@@ -152,7 +157,9 @@ namespace Recorded.Weapons
             _outerSheathLine.numCapVertices = 3;
             _outerSheathLine.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             _outerSheathLine.receiveShadows = false;
-            _outerSheathLine.sharedMaterial = new Material(lineShader) { color = tracerColor };
+            var sheathMaterial = new Material(lineShader) { color = tracerColor };
+            _ownedMaterials.Add(sheathMaterial);
+            _outerSheathLine.sharedMaterial = sheathMaterial;
             _outerSheathLine.enabled = false;
 
             // 3. High-speed visible energy bolt
@@ -165,14 +172,15 @@ namespace Recorded.Weapons
             {
                 _projectileBolt = GameObject.CreatePrimitive(PrimitiveType.Sphere);
                 _projectileBolt.name = "WeaponProjectile_Bolt";
-                _projectileBolt.transform.SetParent(transform, false);
             }
+            _projectileBolt.transform.SetParent(_worldEffects, false);
             _projectileBolt.transform.localScale = new Vector3(0.045f, 0.045f, 0.22f);
 
             Collider boltCol = _projectileBolt.GetComponent<Collider>();
             if (boltCol != null) boltCol.enabled = false;
 
             Material boltMat = new Material(lineShader) { color = tracerColor };
+            _ownedMaterials.Add(boltMat);
             _projectileBoltRenderer = _projectileBolt.GetComponent<Renderer>();
             if (_projectileBoltRenderer != null)
             {
@@ -187,9 +195,10 @@ namespace Recorded.Weapons
         {
             _impactPool.Clear();
 
-            for (int i = 0; i < transform.childCount; i++)
+            // Reuse any existing ImpactEffect_Procedural children (safe inside Prefab instances)
+            for (int i = 0; i < _worldEffects.childCount; i++)
             {
-                Transform child = transform.GetChild(i);
+                Transform child = _worldEffects.GetChild(i);
                 if (child.name.StartsWith("ImpactEffect_Procedural"))
                 {
                     EnsureImpactShockRingSetup(child.gameObject);
@@ -236,7 +245,9 @@ namespace Recorded.Weapons
             ring.receiveShadows = false;
             if (ring.sharedMaterial == null)
             {
-                ring.sharedMaterial = new Material(unlitShader) { color = impactColor };
+                var ringMaterial = new Material(unlitShader) { color = impactColor };
+                _ownedMaterials.Add(ringMaterial);
+                ring.sharedMaterial = ringMaterial;
             }
 
             for (int i = 0; i < ImpactRingSegments; i++)
@@ -250,11 +261,11 @@ namespace Recorded.Weapons
         {
             if (impactPrefab != null)
             {
-                return Instantiate(impactPrefab, transform);
+                return Instantiate(impactPrefab, _worldEffects);
             }
 
             GameObject impactObj = new GameObject("ImpactEffect_Procedural");
-            impactObj.transform.SetParent(transform, false);
+            impactObj.transform.SetParent(_worldEffects, false);
 
             Light impactLight = impactObj.AddComponent<Light>();
             impactLight.type = LightType.Point;
@@ -285,6 +296,8 @@ namespace Recorded.Weapons
             if (muzzleLight == null && _muzzleFlareVisual == null) return;
             if (!Application.isPlaying || !isActiveAndEnabled) return;
 
+            if (muzzleLight != null) muzzleLight.color = tracerColor;
+            if (_muzzleFlareRenderer != null) _muzzleFlareRenderer.sharedMaterial.color = tracerColor;
             if (_muzzleCoroutine != null) StopCoroutine(_muzzleCoroutine);
             _muzzleCoroutine = StartCoroutine(MuzzleFlashRoutine());
         }
@@ -310,6 +323,9 @@ namespace Recorded.Weapons
             if (_tracerLine == null) return;
             if (!Application.isPlaying || !isActiveAndEnabled) return;
 
+            _tracerLine.sharedMaterial.color = tracerColor;
+            if (_outerSheathLine != null) _outerSheathLine.sharedMaterial.color = tracerColor;
+            if (_projectileBoltRenderer != null) _projectileBoltRenderer.sharedMaterial.color = tracerColor;
             if (_tracerCoroutine != null) StopCoroutine(_tracerCoroutine);
             _tracerCoroutine = StartCoroutine(TracerRoutine(from, to));
         }
@@ -460,31 +476,25 @@ namespace Recorded.Weapons
         {
             tracerColor = color;
             impactColor = color;
+            // Capture colors when firing so advancing the cylinder cannot recolor a shot in flight.
+        }
 
-            if (_tracerLine != null && _tracerLine.sharedMaterial != null)
-            {
-                _tracerLine.sharedMaterial.color = color;
-            }
+        private void OnDisable()
+        {
+            StopAllCoroutines();
+            _muzzleCoroutine = _tracerCoroutine = null;
+            if (muzzleLight != null) muzzleLight.enabled = false;
+            if (_muzzleFlareVisual != null) _muzzleFlareVisual.SetActive(false);
+            if (_tracerLine != null) _tracerLine.enabled = false;
+            if (_outerSheathLine != null) _outerSheathLine.enabled = false;
+            if (_projectileBolt != null) _projectileBolt.SetActive(false);
+            if (_worldEffects != null) InitializeImpactPool();
+        }
 
-            if (_outerSheathLine != null && _outerSheathLine.sharedMaterial != null)
-            {
-                _outerSheathLine.sharedMaterial.color = color;
-            }
-
-            if (_projectileBoltRenderer != null && _projectileBoltRenderer.sharedMaterial != null)
-            {
-                _projectileBoltRenderer.sharedMaterial.color = color;
-            }
-
-            if (_muzzleFlareRenderer != null && _muzzleFlareRenderer.sharedMaterial != null)
-            {
-                _muzzleFlareRenderer.sharedMaterial.color = color;
-            }
-
-            if (muzzleLight != null)
-            {
-                muzzleLight.color = color;
-            }
+        private void OnDestroy()
+        {
+            if (_worldEffects != null) Destroy(_worldEffects.gameObject);
+            foreach (var material in _ownedMaterials) if (material != null) Destroy(material);
         }
     }
 }

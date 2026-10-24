@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 using UnityEngine.InputSystem;
 using Recorded.ColorSystem;
 
@@ -24,6 +24,15 @@ namespace Recorded.Weapons
         [SerializeField] private Renderer rgbCoreRenderer;
         [SerializeField] private Light chamberGlowLight;
         [SerializeField] private UI.CrosshairUI crosshairUI;
+        [SerializeField] private Animator shotAnimator;
+        private static readonly int FireTrigger = Animator.StringToHash("Fire");
+        private static readonly int ReloadTrigger = Animator.StringToHash("Reload");
+        public bool IsReloading => _isReloading;
+        public const float ReloadRefillPoint = 1.05f / 1.8f;
+        public bool ReloadAmmoLoaded { get; private set; }
+        public float ReloadProgress => TryGetReloadState(out var state) ? Mathf.Clamp01(state.normalizedTime) : 0f;
+        private bool _isReloading;
+        private Coroutine _reloadRoutine;
 
         [Header("Ammunition System Integration")]
         [SerializeField] private Ammo.CylinderAmmoController ammoController;
@@ -59,6 +68,7 @@ namespace Recorded.Weapons
         private Vector3 _modelBaseLocalPos = Vector3.zero;
         private Quaternion _modelBaseLocalRot = Quaternion.Euler(0f, -90f, 0f);
         private float _currentRecoil;
+        private Light[] _glowLights;
 
         public SpectrumColorMode CurrentMode => currentMode;
         public float FireRate { get => fireRate; set => fireRate = Mathf.Max(0.1f, value); }
@@ -117,10 +127,13 @@ namespace Recorded.Weapons
             }
 
             ResolveCoreRenderer();
+            if (shotAnimator == null) shotAnimator = GetComponentInParent<Animator>();
         }
 
         private void EnsureViewmodelAndMuzzleAlignment()
         {
+            // A hand-mounted REV keeps its authored grip and calibrated muzzle, with no model recoil.
+            if (_revolverModelTransform == null) return;
             // Ensure first-person viewmodel sits naturally close to the player's right hand rather than floating far away
             if (transform.parent != null && transform.parent.GetComponent<Camera>() != null)
             {
@@ -186,6 +199,17 @@ namespace Recorded.Weapons
 
         private void OnDisable()
         {
+            bool wasReloading = _isReloading;
+            if (_reloadRoutine != null) StopCoroutine(_reloadRoutine);
+            _reloadRoutine = null;
+            _isReloading = false;
+            ReloadAmmoLoaded = false;
+            if (shotAnimator != null && shotAnimator.isActiveAndEnabled && shotAnimator.isInitialized)
+            {
+                shotAnimator.ResetTrigger(FireTrigger);
+                shotAnimator.ResetTrigger(ReloadTrigger);
+                if (wasReloading) shotAnimator.Play("Ready", 0, 0f);
+            }
             if (_resolvedAttackAction != null)
             {
                 _resolvedAttackAction.Disable();
@@ -202,6 +226,7 @@ namespace Recorded.Weapons
         private void Update()
         {
             UpdateRecoilAnimation();
+            if (crosshairUI != null && crosshairUI.TryGetComponent<UI.CrosshairSettingsUI>(out var settings) && settings.IsOpen) return;
             CheckColorSwitchInput();
 
             if (CheckFireInput())
@@ -237,6 +262,7 @@ namespace Recorded.Weapons
 
         private void CheckColorSwitchInput()
         {
+            if (_isReloading) return;
             if (rotationController == null)
             {
                 rotationController = FindFirstObjectByType<Ammo.CylinderRotationController>();
@@ -315,8 +341,7 @@ namespace Recorded.Weapons
                 var dedicatedTestInput = ammoController.GetComponent<Ammo.AmmoTestInput>();
                 if (dedicatedTestInput == null || !dedicatedTestInput.isActiveAndEnabled)
                 {
-                    ammoController.TestReloadRandom();
-                    Debug.Log("<color=#FFE84D><b>[Spectrum Gun]</b> Test Reload (R): Filled all 6 chambers with randomized RED, GREEN, CYAN distribution.</color>");
+                    TriggerReload();
                 }
             }
         }
@@ -331,6 +356,7 @@ namespace Recorded.Weapons
 
         private bool CheckFireInput()
         {
+            if (_isReloading) return false;
             if (_resolvedAttackAction != null)
             {
                 return isAutomatic
@@ -354,9 +380,10 @@ namespace Recorded.Weapons
         /// </summary>
         public bool AttemptFire()
         {
-            if (Time.time < _nextFireTime) return false;
+            if (_isReloading || Time.time < _nextFireTime) return false;
 
             ResolveDependencies();
+            if (raycastWeapon == null) return false;
 
             if (raycastWeapon == null) return false;
 
@@ -461,6 +488,7 @@ namespace Recorded.Weapons
                     rotationController.AutoAdvance();
                 }
 
+                PlayShotAnimation();
                 return true;
             }
 
@@ -522,12 +550,82 @@ namespace Recorded.Weapons
                 }
             }
 
+            PlayShotAnimation();
             return true;
+        }
+
+        private void PlayShotAnimation()
+        {
+            if (shotAnimator == null || !shotAnimator.isActiveAndEnabled || shotAnimator.runtimeAnimatorController == null) return;
+            shotAnimator.ResetTrigger(FireTrigger);
+            shotAnimator.SetTrigger(FireTrigger);
         }
 
         private void HandleActiveChamberChanged(int activeIndex)
         {
             SyncWithActiveChamber();
+        }
+
+        public bool TriggerReload()
+        {
+            if (_isReloading) return false;
+            ResolveDependencies();
+
+            if (shotAnimator == null || !shotAnimator.isActiveAndEnabled || shotAnimator.runtimeAnimatorController == null)
+            {
+                if (ammoController != null) ammoController.TestReloadRandom();
+                return true;
+            }
+
+            _reloadRoutine = StartCoroutine(ReloadSequence());
+            return true;
+        }
+
+        private System.Collections.IEnumerator ReloadSequence()
+        {
+            _isReloading = true;
+            ReloadAmmoLoaded = false;
+            if (shotAnimator != null && shotAnimator.isActiveAndEnabled)
+            {
+                shotAnimator.ResetTrigger(FireTrigger);
+                shotAnimator.ResetTrigger(ReloadTrigger);
+                shotAnimator.SetTrigger(ReloadTrigger);
+            }
+
+            // Follow the clip so speed changes and pauses also pause ammo loading and the HUD.
+            bool enteredReload = false;
+            while (shotAnimator != null && shotAnimator.isActiveAndEnabled && shotAnimator.runtimeAnimatorController != null)
+            {
+                if (TryGetReloadState(out var state))
+                {
+                    enteredReload = true;
+                    if (!ReloadAmmoLoaded && state.normalizedTime >= ReloadRefillPoint)
+                    {
+                        ReloadAmmoLoaded = true;
+                        if (ammoController != null) ammoController.TestReloadRandom();
+                        SyncWithActiveChamber();
+                    }
+                }
+                else if (enteredReload) break;
+                yield return null;
+            }
+
+            _isReloading = false;
+            _reloadRoutine = null;
+        }
+
+        private bool TryGetReloadState(out AnimatorStateInfo state)
+        {
+            state = default;
+            if (!_isReloading || shotAnimator == null || !shotAnimator.isInitialized) return false;
+            state = shotAnimator.GetCurrentAnimatorStateInfo(0);
+            if (state.IsName("Reload")) return true;
+            if (shotAnimator.IsInTransition(0))
+            {
+                state = shotAnimator.GetNextAnimatorStateInfo(0);
+                if (state.IsName("Reload")) return true;
+            }
+            return false;
         }
 
         private void HandleChamberStateChanged(int chamberIndex, Ammo.AmmoType newAmmo)
@@ -598,23 +696,7 @@ namespace Recorded.Weapons
             }
 
             // 4. Update Chamber Glow Light
-            if (chamberGlowLight == null)
-            {
-                Transform glowTr = transform.Find("ChamberGlow");
-                if (glowTr != null) chamberGlowLight = glowTr.GetComponent<Light>();
-            }
-            if (chamberGlowLight != null)
-            {
-                if (activeAmmo == Ammo.AmmoType.Empty)
-                {
-                    chamberGlowLight.enabled = false;
-                }
-                else
-                {
-                    chamberGlowLight.enabled = true;
-                    chamberGlowLight.color = activeColor;
-                }
-            }
+            UpdateGlowLights(activeColor, activeAmmo != Ammo.AmmoType.Empty);
         }
 
         public void SetColorMode(SpectrumColorMode mode)
@@ -661,18 +743,28 @@ namespace Recorded.Weapons
             }
 
             // 4. Update Chamber Glow Light
-            if (chamberGlowLight == null)
-            {
-                Transform glowTr = transform.Find("ChamberGlow");
-                if (glowTr != null) chamberGlowLight = glowTr.GetComponent<Light>();
-            }
-            if (chamberGlowLight != null)
-            {
-                chamberGlowLight.enabled = true;
-                chamberGlowLight.color = activeColor;
-            }
+            UpdateGlowLights(activeColor, true);
 
             Debug.Log($"<color=#{ColorUtility.ToHtmlStringRGB(activeColor)}><b>[Spectrum Gun]</b> Switched Mode: {mode.ToString().ToUpper()}</color>");
+        }
+
+        private void UpdateGlowLights(Color color, bool hasRound)
+        {
+            if (_glowLights == null)
+            {
+                if (chamberGlowLight == null)
+                    chamberGlowLight = transform.Find("ChamberGlow")?.GetComponent<Light>();
+                _glowLights = new Light[11];
+                _glowLights[0] = chamberGlowLight;
+                for (int i = 1; i <= 10; i++)
+                    _glowLights[i] = transform.Find("glow" + i)?.GetComponent<Light>();
+            }
+            foreach (var light in _glowLights)
+            {
+                if (light == null) continue;
+                light.color = color;
+                light.enabled = hasRound;
+            }
         }
 
         private void ResolveCoreRenderer()

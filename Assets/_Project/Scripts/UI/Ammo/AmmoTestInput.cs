@@ -47,13 +47,13 @@ namespace Recorded.Weapons.Ammo
 
         private void Update()
         {
-            // Always allow R test reload through AmmoTestInput (the dedicated temporary reload component)
-            HandleReloadInput();
-
             if (_cachedGunController == null)
             {
                 _cachedGunController = FindFirstObjectByType<SpectrumGunController>();
             }
+
+            // R uses the equipped weapon's animation and delayed refill when available.
+            HandleReloadInput();
 
             // If SpectrumGunController is active in the scene, let it handle Q/E/Scroll rotation and weapon firing
             if (_cachedGunController != null && _cachedGunController.isActiveAndEnabled)
@@ -111,6 +111,11 @@ namespace Recorded.Weapons.Ammo
 
             if (Keyboard.current != null && Keyboard.current.rKey.wasPressedThisFrame)
             {
+                if (_cachedGunController != null && _cachedGunController.isActiveAndEnabled)
+                {
+                    _cachedGunController.TriggerReload();
+                    return;
+                }
                 ammoController.TestReloadRandom();
                 Debug.Log("<color=#FFE84D><b>[AmmoTestInput]</b> Test Reload (R): Filled all 6 chambers with randomized RED, GREEN, CYAN distribution.</color>");
             }

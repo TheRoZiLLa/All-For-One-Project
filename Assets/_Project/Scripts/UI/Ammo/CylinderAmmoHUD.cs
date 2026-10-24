@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -15,10 +15,11 @@ namespace Recorded.Weapons.Ammo
         [Header("System References")]
         [SerializeField] private CylinderAmmoController ammoController;
         [SerializeField] private CylinderRotationController rotationController;
+        [SerializeField] private SpectrumGunController weaponController;
 
         [Header("Layout & Positioning")]
-        [Tooltip("Offset in pixels from the bottom-left corner of the screen.")]
-        [SerializeField] private Vector2 screenOffset = new Vector2(115f, 115f);
+        [Tooltip("Offset in pixels from the bottom-right corner of the screen.")]
+        [SerializeField] private Vector2 screenOffset = new Vector2(-115f, 115f);
 
         [Tooltip("Diameter of the cylinder HUD in pixels.")]
         [SerializeField] private float hudDiameter = 176f;
@@ -54,6 +55,13 @@ namespace Recorded.Weapons.Ammo
         private Image _activeBracketRingImage;
         private Image _activeChevronImage;
         private float _indicatorPulse;
+        private Transform _weaponCylinder;
+        private Vector3 _closedCylinderCenter;
+        private Vector3 _cylinderMeshCenter;
+        private Quaternion _closedCylinderRotation;
+        private float _cylinderRadius;
+        private bool _wasReloading, _hideReloadRounds;
+        private float _reloadSpin, _previousSpin;
 
         public RectTransform InnerCylinderRect => _innerCylinderRect;
 
@@ -80,6 +88,7 @@ namespace Recorded.Weapons.Ammo
 
         private void OnDisable()
         {
+            ResetReloadVisuals();
             if (ammoController != null)
             {
                 ammoController.OnChamberStateChanged -= HandleChamberStateChanged;
@@ -118,6 +127,69 @@ namespace Recorded.Weapons.Ammo
                 rotationController = GetComponent<CylinderRotationController>();
                 if (rotationController == null) rotationController = FindFirstObjectByType<CylinderRotationController>();
             }
+            if (weaponController == null) weaponController = FindFirstObjectByType<SpectrumGunController>();
+            if (_weaponCylinder == null && weaponController != null)
+            {
+                var cylinder = weaponController.transform.Find("Barrel") ?? weaponController.transform.Find("RevolverModel/Barrel");
+                var mesh = cylinder != null ? cylinder.GetComponent<MeshFilter>() : null;
+                if (mesh != null && mesh.sharedMesh != null)
+                {
+                    _weaponCylinder = cylinder;
+                    _cylinderMeshCenter = mesh.sharedMesh.bounds.center;
+                    _closedCylinderRotation = cylinder.localRotation;
+                    _closedCylinderCenter = cylinder.localPosition + cylinder.localRotation * _cylinderMeshCenter;
+                    _cylinderRadius = Mathf.Max(0.0001f, mesh.sharedMesh.bounds.extents.y);
+                }
+            }
+        }
+
+        private void LateUpdate()
+        {
+            if (weaponController == null || !weaponController.IsReloading || _weaponCylinder == null || _innerCylinderRect == null)
+            {
+                ResetReloadVisuals();
+                return;
+            }
+            if (!_wasReloading)
+            {
+                _wasReloading = true;
+                _reloadSpin = _previousSpin = 0f;
+            }
+            var center = _weaponCylinder.localPosition + _weaponCylinder.localRotation * _cylinderMeshCenter;
+            var offset = center - _closedCylinderCenter;
+            var rotation = Quaternion.Inverse(_closedCylinderRotation) * _weaponCylinder.localRotation;
+            // The crane's arc contributes half its swing angle to the center's displacement direction.
+            float swing = offset.sqrMagnitude > 0.0000000001f
+                ? Mathf.DeltaAngle(0f, 2f * Mathf.Atan2(-offset.y, offset.z) * Mathf.Rad2Deg) : 0f;
+            float rawSpin = 2f * Mathf.Atan2(rotation.x, rotation.w) * Mathf.Rad2Deg - swing;
+            _reloadSpin += Mathf.DeltaAngle(_previousSpin, rawSpin);
+            _previousSpin = rawSpin;
+            if (rotationController != null) rotationController.SetReloadVisualAngle(_reloadSpin);
+            float radius = _innerCylinderRect.sizeDelta.x * 0.5f;
+            _innerCylinderRect.anchoredPosition = new Vector2(-offset.z, offset.y) / _cylinderRadius * (radius * 0.65f);
+
+            bool hideRounds = !weaponController.ReloadAmmoLoaded && offset.magnitude > _cylinderRadius * 0.25f;
+            if (_hideReloadRounds != hideRounds)
+            {
+                _hideReloadRounds = hideRounds;
+                RefreshAllChambers();
+            }
+            float insertion = weaponController.ReloadAmmoLoaded
+                ? 1f + 0.12f * (1f - Mathf.SmoothStep(0f, 1f, Mathf.Clamp01((weaponController.ReloadProgress - SpectrumGunController.ReloadRefillPoint) * 10f))) : 1f;
+            foreach (var chamber in _chamberVisuals)
+                if (chamber.cartridgeBaseImage != null) chamber.cartridgeBaseImage.transform.localScale = Vector3.one * insertion;
+            UpdateActiveIndicatorTint();
+        }
+
+        private void ResetReloadVisuals()
+        {
+            if (!_wasReloading) return;
+            _wasReloading = _hideReloadRounds = false;
+            if (_innerCylinderRect != null) _innerCylinderRect.anchoredPosition = Vector2.zero;
+            if (rotationController != null) rotationController.SetReloadVisualAngle(0f);
+            foreach (var chamber in _chamberVisuals)
+                if (chamber.cartridgeBaseImage != null) chamber.cartridgeBaseImage.transform.localScale = Vector3.one;
+            RefreshAllChambers();
         }
 
         /// <summary>
@@ -179,15 +251,15 @@ namespace Recorded.Weapons.Ammo
                 canvasObj.AddComponent<GraphicRaycaster>();
             }
 
-            // 2. HUD Root Container (Anchored Bottom-Left)
+            // 2. HUD Root Container (Anchored Bottom-Right)
             GameObject rootObj = new GameObject("CylinderHUD_Root");
             rootObj.transform.SetParent(canvas.transform, false);
 
             _rootContainer = rootObj.AddComponent<RectTransform>();
-            _rootContainer.anchorMin = Vector2.zero; // Bottom-Left
-            _rootContainer.anchorMax = Vector2.zero;
+            _rootContainer.anchorMin = new Vector2(1f, 0f); // Bottom-Right
+            _rootContainer.anchorMax = new Vector2(1f, 0f);
             _rootContainer.pivot = new Vector2(0.5f, 0.5f);
-            _rootContainer.anchoredPosition = screenOffset;
+            _rootContainer.anchoredPosition = new Vector2(-Mathf.Abs(screenOffset.x), Mathf.Abs(screenOffset.y));
             _rootContainer.sizeDelta = new Vector2(hudDiameter, hudDiameter);
 
             // 3. Stationary Outer Gunmetal Housing
@@ -501,6 +573,7 @@ namespace Recorded.Weapons.Ammo
             Color tint = activeAmmo == AmmoType.Empty
                 ? new Color(0.45f, 0.50f, 0.56f, 0.65f)
                 : GetAmmoColor(activeAmmo);
+            if (weaponController != null && weaponController.IsReloading) tint.a *= 0.3f;
 
             if (_activeBracketRingImage != null)
             {
@@ -518,6 +591,7 @@ namespace Recorded.Weapons.Ammo
 
             ChamberUI chamber = _chamberVisuals[index];
             if (chamber.root == null) return;
+            if (_hideReloadRounds) ammo = AmmoType.Empty;
 
             if (ammo == AmmoType.Empty)
             {

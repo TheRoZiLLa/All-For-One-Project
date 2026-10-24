@@ -9,31 +9,81 @@ namespace Recorded.UI
     public class CrosshairSettingsUI : MonoBehaviour
     {
         [SerializeField] private bool startOpen;
-        [SerializeField] private KeyCode toggleKey = KeyCode.F7;
+        [SerializeField] private Key toggleKey = Key.F7;
         private CrosshairUI _crosshair;
         private GameObject _panel;
         private Text _styleValue;
         private Slider _sizeSlider;
         private Slider _gapSlider;
+        private Recorded.FirstPersonLook _look;
+        private bool _resumeLook, _open, _previousCursorVisible;
+        private CursorLockMode _previousCursorLock;
+        public bool IsOpen => _open;
 
         private void Awake()
         {
             _crosshair = GetComponent<CrosshairUI>();
             _crosshair.EnsureCrosshairHierarchy();
             BuildIfNeeded();
-            _panel.SetActive(startOpen);
+            _look = GetComponentInParent<Recorded.FirstPersonLook>();
+            if (_panel != null) _panel.SetActive(false);
+            SetOpen(startOpen);
         }
 
         private void Update()
         {
-            if (Keyboard.current != null && Keyboard.current.f7Key.wasPressedThisFrame) ToggleSettings();
+            if (Keyboard.current != null && toggleKey != Key.None && Keyboard.current[toggleKey].wasPressedThisFrame) ToggleSettings();
         }
-        public void ToggleSettings() { if (_panel != null) _panel.SetActive(!_panel.activeSelf); }
+        public void ToggleSettings() => SetOpen(!_open);
+        private void SetOpen(bool open)
+        {
+            if (_open == open) return;
+            _open = open;
+            if (_panel != null) _panel.SetActive(open);
+            if (open)
+            {
+                _previousCursorLock = Cursor.lockState;
+                _previousCursorVisible = Cursor.visible;
+                _resumeLook = _look != null && _look.enabled;
+                if (_resumeLook) _look.enabled = false;
+                Cursor.lockState = CursorLockMode.None;
+                Cursor.visible = true;
+            }
+            else
+            {
+                if (_resumeLook && _look != null) _look.enabled = true;
+                Cursor.lockState = _previousCursorLock;
+                Cursor.visible = _previousCursorVisible;
+            }
+        }
+        private void OnDisable() => SetOpen(false);
 
         private void BuildIfNeeded()
         {
             Canvas canvas = _crosshair.Canvas;
-            if (canvas == null || canvas.transform.Find("Crosshair_Settings") != null) return;
+            if (canvas == null) return;
+            if (UnityEngine.EventSystems.EventSystem.current == null)
+            {
+                var events = new GameObject("UI EventSystem", typeof(UnityEngine.EventSystems.EventSystem), typeof(UnityEngine.InputSystem.UI.InputSystemUIInputModule));
+                events.transform.SetParent(canvas.transform, false);
+            }
+            var existing = canvas.transform.Find("Crosshair_Settings");
+            if (existing != null)
+            {
+                _panel = existing.gameObject;
+                _styleValue = existing.Find("Style").GetComponentInChildren<UnityEngine.UI.Text>();
+                _sizeSlider = existing.Find("Size").GetComponent<UnityEngine.UI.Slider>();
+                _gapSlider = existing.Find("Gap").GetComponent<UnityEngine.UI.Slider>();
+                BindButton("Style", CycleStyle);
+                BindButton("Color", CycleColor);
+                BindButton("Dot", ToggleDot);
+                _sizeSlider.onValueChanged.RemoveListener(_crosshair.SetReticleSize);
+                _sizeSlider.onValueChanged.AddListener(_crosshair.SetReticleSize);
+                _gapSlider.onValueChanged.RemoveListener(_crosshair.SetCenterGap);
+                _gapSlider.onValueChanged.AddListener(_crosshair.SetCenterGap);
+                RefreshLabels();
+                return;
+            }
             _panel = CreatePanel(canvas.transform, "Crosshair_Settings", new Vector2(-24, -24), new Vector2(330, 228));
             RectTransform rt = _panel.GetComponent<RectTransform>();
             rt.anchorMin = rt.anchorMax = new Vector2(1, 1); rt.pivot = new Vector2(1, 1);
@@ -44,6 +94,13 @@ namespace Recorded.UI
             CreateButton(_panel.transform, "Color", new Vector2(16, -196), new Vector2(142, 26), "COLOR: CYCLE", CycleColor);
             CreateButton(_panel.transform, "Dot", new Vector2(172, -196), new Vector2(142, 26), "DOT: ON/OFF", ToggleDot);
             RefreshLabels();
+        }
+
+        private void BindButton(string name, UnityEngine.Events.UnityAction action)
+        {
+            var button = _panel.transform.Find(name).GetComponent<UnityEngine.UI.Button>();
+            button.onClick.RemoveListener(action);
+            button.onClick.AddListener(action);
         }
 
         private void CycleStyle() { _crosshair.SetStyle((CrosshairUI.ReticleStyle)(((int)_crosshair.Style + 1) % 4)); RefreshLabels(); }

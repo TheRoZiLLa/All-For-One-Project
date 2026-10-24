@@ -190,6 +190,7 @@ namespace Recorded.Testing
         private void SetupSpectrumGun(Camera cam)
         {
             if (cam == null) return;
+            if (RevolverWeaponBuilder.TryConfigureHeldRevolver(cam)) return;
 
             Transform existingGun = cam.transform.Find("SpectrumGun");
             if (existingGun != null)

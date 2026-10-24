@@ -109,25 +109,8 @@ namespace Recorded.Weapons
                 ? playerCamera.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0f))
                 : new Ray(transform.position, transform.forward);
 
-            bool foundAimHit = false;
-            RaycastHit bestAimHit = default;
-
-            RaycastHit[] hits = Physics.RaycastAll(aimRay, maxRange, hitLayers, triggerInteraction);
-            if (hits != null && hits.Length > 0)
-            {
-                Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
-                for (int i = 0; i < hits.Length; i++)
-                {
-                    if (IsSelfCollider(hits[i].collider))
-                    {
-                        continue;
-                    }
-
-                    bestAimHit = hits[i];
-                    foundAimHit = true;
-                    break;
-                }
-            }
+            if (playerCamera != null) aimRay.origin = playerCamera.transform.position;
+            bool foundAimHit = TryHit(aimRay, maxRange, out RaycastHit bestAimHit);
 
             Vector3 desiredTargetPoint = foundAimHit
                 ? bestAimHit.point
@@ -137,31 +120,28 @@ namespace Recorded.Weapons
             if (muzzlePoint != null && muzzlePoint != transform)
             {
                 Vector3 muzzlePos = muzzlePoint.position;
+                // The overlay muzzle can be beyond a wall even though the hands remain visible.
+                Vector3 toMuzzle = muzzlePos - aimRay.origin;
+                if (TryHit(new Ray(aimRay.origin, toMuzzle.normalized), toMuzzle.magnitude, out hitInfo))
+                {
+                    targetPoint = hitInfo.point;
+                    OnTargetHit?.Invoke(hitInfo);
+                    return true;
+                }
                 Vector3 toTarget = desiredTargetPoint - muzzlePos;
                 float distToTarget = toTarget.magnitude;
 
                 if (distToTarget > 0.05f)
                 {
-                    RaycastHit[] muzzleHits = Physics.RaycastAll(muzzlePos, toTarget / distToTarget, distToTarget - 0.02f, hitLayers, triggerInteraction);
-                    if (muzzleHits != null && muzzleHits.Length > 0)
+                    if (TryHit(new Ray(muzzlePos, toTarget / distToTarget), distToTarget - 0.02f, out RaycastHit muzzleHit))
                     {
-                        Array.Sort(muzzleHits, (a, b) => a.distance.CompareTo(b.distance));
-                        for (int i = 0; i < muzzleHits.Length; i++)
+                        // If an obstacle blocks the barrel before reaching the crosshair target
+                        if (!foundAimHit || muzzleHit.collider != bestAimHit.collider)
                         {
-                            if (IsSelfCollider(muzzleHits[i].collider))
-                            {
-                                continue;
-                            }
-
-                            // If an obstacle blocks the barrel before reaching the crosshair target
-                            if (!foundAimHit || muzzleHits[i].collider != bestAimHit.collider)
-                            {
-                                hitInfo = muzzleHits[i];
-                                targetPoint = hitInfo.point;
-                                OnTargetHit?.Invoke(hitInfo);
-                                return true;
-                            }
-                            break;
+                            hitInfo = muzzleHit;
+                            targetPoint = hitInfo.point;
+                            OnTargetHit?.Invoke(hitInfo);
+                            return true;
                         }
                     }
                 }
@@ -179,6 +159,19 @@ namespace Recorded.Weapons
             targetPoint = desiredTargetPoint;
             OnTargetMiss?.Invoke(aimRay.origin, aimRay.direction);
             return false;
+        }
+
+        private bool TryHit(Ray ray, float distance, out RaycastHit nearest)
+        {
+            nearest = default;
+            bool found = false;
+            foreach (var hit in Physics.RaycastAll(ray, distance, hitLayers, triggerInteraction))
+            {
+                if (IsSelfCollider(hit.collider) || (found && hit.distance >= nearest.distance)) continue;
+                nearest = hit;
+                found = true;
+            }
+            return found;
         }
 
         private bool IsSelfCollider(Collider col)

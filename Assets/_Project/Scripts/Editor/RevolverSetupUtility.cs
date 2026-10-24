@@ -125,13 +125,6 @@ namespace Recorded.EditorTools
 
             var activeScene = EditorSceneManager.GetActiveScene();
 
-            // 1. Ensure Prefab exists
-            GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(PrefabPath);
-            if (prefab == null || force)
-            {
-                prefab = CreateOrUpdateRevolverPrefab();
-            }
-
             // 2. Find or Spawn Player & Camera
             GameObject player = GameObject.Find("Player");
             if (player == null)
@@ -163,6 +156,13 @@ namespace Recorded.EditorTools
             if (playerCam == null)
             {
                 Debug.LogError("[RevolverSetup] Could not find or spawn Player Camera in scene.");
+                return;
+            }
+
+            if (RevolverWeaponBuilder.TryConfigureHeldRevolver(playerCam))
+            {
+                EditorSceneManager.MarkSceneDirty(activeScene);
+                EditorSceneManager.SaveScene(activeScene);
                 return;
             }
 
@@ -212,6 +212,9 @@ namespace Recorded.EditorTools
             }
 
             // 4. Instantiate Revolver Prefab under Camera and unpack completely
+            GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(PrefabPath);
+            if (prefab == null || force) prefab = CreateOrUpdateRevolverPrefab();
+            if (prefab == null) return;
             GameObject gunInstance = (GameObject)PrefabUtility.InstantiatePrefab(prefab, activeScene);
             PrefabUtility.UnpackPrefabInstance(gunInstance, PrefabUnpackMode.Completely, InteractionMode.AutomatedAction);
             gunInstance.name = "SpectrumGun";

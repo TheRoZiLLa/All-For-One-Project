@@ -12,13 +12,17 @@ The original SampleScene, its unsaved objects and original InputSystem_Actions a
 
 Drag `Assets/Recorded/Prefabs/Player.prefab` into a scene with solid floor colliders.
 Place the root at foot level, with scale (1, 1, 1) and only yaw rotation.
-Use one local player camera and AudioListener; disable the scene's old camera/listener if necessary.
+Use the prefab's base camera, hands-only overlay camera and single AudioListener;
+disable the scene's old camera/listener if necessary.
 Do not put the player under a scaled or tilted parent.
 
 ```text
 Player: CharacterController, PlayerInputReader, FirstPersonLook, FirstPersonMotor
   CameraPivot
     MainCamera: Camera, AudioListener
+      Viewmodel: FirstPersonViewmodel
+        Arms: Animator with REV_Viewmodel controller, original hands and gun
+      ViewmodelCamera: URP Overlay, Viewmodel layer only
   Camera Effects: global Volume with PlayerCameraProfile
 ```
 
@@ -31,10 +35,13 @@ MovementSetup in the Editor folder generated the assets through Unity APIs.
 - `Movement/PlayerInputReader.cs`: cloned Input System actions and live input collection.
 - `Movement/FirstPersonMotor.cs`: CharacterController movement, crouch, grounding and impulses.
 - `Movement/FirstPersonLook.cs`: camera pitch, player yaw, cursor ownership and walking camera motion.
+- `Movement/FirstPersonViewmodel.cs`: smooth wall proximity retraction and synchronized hands-camera FOV.
 - `Movement/PlayerMovementSettings.cs`: Inspector tuning values and capsule validation.
 - `Movement/MovementData.cs`: input command, movement states and read-only snapshot.
 - `Editor/MovementSetup.cs`: prefab and sandbox creation through Unity's Editor API.
+- `Editor/ViewmodelSetup.cs`: attaches existing arms to the camera and configures the URP camera stack.
 - `Tests/PlayMode/MovementTests.cs`: movement and walking-camera regression tests.
+- `Tests/PlayMode/ViewmodelTests.cs`: camera attachment and wall retraction checks at 30/60/144 FPS.
 - Three assembly definitions isolate runtime, Editor and test code.
 - `Input/RecordedInput.inputactions`, `Prefabs/Player.prefab`, `Scenes/MovementSandbox.unity`
   and `Materials/Floor.mat`, `Materials/Obstacles.mat`: playable assets.
@@ -87,6 +94,21 @@ View this effect in Game view. Lower Intensity or disable the Motion Blur overri
 Other lighting and color profiles are preserved. `MovementSetup.ConfigureCameraEffects` creates
 the same setup when generating a fresh Player prefab.
 
+The saved Player prefab includes the existing Arms rig and gun under MainCamera, preserving their pose.
+Parenting makes hands follow pitch, yaw, bob and roll immediately. ViewmodelCamera follows the same
+transform and FOV, clears world depth and draws only the Viewmodel layer; MainCamera excludes that layer.
+This keeps hands visible against nearby walls. Hands do not cast/receive shadows; the overlay disables
+post-processing, shadows, depth/color texture requests and automatic Volume updates.
+At `MainCamera > Viewmodel > FirstPersonViewmodel`, wall detection starts at 0.8 m and smoothly
+pulls back up to 0.08 m / lowers the gun by 10 degrees, with a 0.08 s response. It ignores player colliders.
+This is a visual viewmodel effect. The saved prefab now has the Spectrum weapon system on the held REV;
+its raycasts check world geometry between the camera, muzzle and target. See
+`Assets/_Project/README_SPECTRUM_GUN.md` for ammo, effects and verification details.
+Replacement hands must also use the Viewmodel layer.
+The Arms Animator animates only the right arm bones for firing; it leaves the camera and
+FirstPersonViewmodel wall-retraction transform untouched. The saved rest pose and authored
+gun glow lights are retained.
+
 Edit `Assets/Recorded/Input/RecordedInput.inputactions` to change bindings.
 It is a dedicated copy of the project's existing actions, with crouch changed to Left Ctrl.
 The reader clones this asset at runtime so enabling one player cannot disable another player's maps.
@@ -114,7 +136,7 @@ This API separates input from execution; it does not promise deterministic physi
 
 ## Checks and limits
 
-On 2026-10-24, Unity Test Runner passed all 27 PlayMode cases on Unity 6000.3.27f1.
+On 2026-10-24, Unity Test Runner passed all 31 PlayMode cases on Unity 6000.3.27f1.
 The full six-tread sandbox staircase was also checked directly through MCP with the saved Player prefab:
 walking, sprinting and crouching all reached the 1.2 m top and cleared the flight at 30, 60 and 144 FPS.
 The previous stair failure came from the ground probe missing rounded stair edges and input speed
@@ -125,8 +147,19 @@ direction reversals, return to rest, knockback without footsteps, immediate mous
 headroom and stair smoothing.
 The saved Player prefab was also checked in Play Mode: its camera resolved the dedicated
 Motion Blur override in the Volume stack at intensity 0.12 / clamp 0.025, and rendered a Game view capture.
-Two pre-existing Package Manager `ScriptableSingleton already exists` errors remain in the Console;
-no movement errors were logged during these checks.
+The hands camera stack, preserved rig pose, single AudioListener and near-wall retraction were checked
+in the saved scene/prefab. An actual Game view capture against a wall showed the hands and gun intact.
+Viewmodel tests cover immediate pitch/yaw/roll/FOV synchronization, smooth bounded retraction,
+own-collider exclusion, return to rest and disabling the component at 30/60/144 FPS.
+
+Editor timing samples used the same sandbox spawn and focused Game view, 20 warm-up frames and
+150 measured frames. Before the viewmodel change: median 7.88 ms, p95 9.61 ms (~127 FPS).
+With the final overlay setup: median 8.81 ms, p95 10.54 ms (~114 FPS). The overlay adds about 0.93 ms;
+this change fixes rendering, and is not an overall FPS improvement. An intermediate overlay sample
+was 9.36 ms before skipping unused Volume updates; short Editor samples include normal variation.
+Turning blur off in a separate sample gave 7.74 ms, so it was not a large cost in this scene.
+An unfocused Editor sample was about 100 ms (~10 FPS); severe foreground runtime lag was not
+reproduced. GPU timing was unavailable, and no standalone build or final-level benchmark was run.
 
 `Tests/PlayMode/MovementTests.cs` contains assertions for movement normalization, turning and stopping,
 sprint/crouch priority, jump apex and double-jump rejection, coyote time, jump buffering,
@@ -135,5 +168,6 @@ stairs/slopes, pitch and snapshot data, and input-map ownership.
 Run this assembly from Unity Test Runner's PlayMode tab after saving your scene.
 
 The CharacterController supports static environment collisions and external velocity.
-Rigidbody pushing, moving-platform attachment, networking, weapons and recording/replay are outside this foundation.
+Rigidbody pushing, moving-platform attachment, networking and recording/replay are outside this foundation.
+Weapon gameplay is provided separately by the Spectrum scripts under `Assets/_Project/Scripts/Weapons`.
 Mouse comfort, actual hardware controls and collision behavior in the final level still need hands-on playtesting.

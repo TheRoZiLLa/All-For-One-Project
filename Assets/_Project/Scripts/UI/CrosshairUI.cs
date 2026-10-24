@@ -33,6 +33,7 @@ namespace Recorded.UI
         {
             if (_rootContainer != null) return;
             _canvas = GetComponentInParent<Canvas>();
+            if (_canvas == null) _canvas = transform.Find("Crosshair_Canvas")?.GetComponent<Canvas>();
             if (_canvas == null)
             {
                 GameObject canvasObj = new GameObject("Crosshair_Canvas");
@@ -64,7 +65,12 @@ namespace Recorded.UI
         public void SetReticleSize(float value) { reticleSize = Mathf.Clamp(value, 4f, 32f); RebuildVisual(); }
         public void SetCenterGap(float value) { centerGap = Mathf.Clamp(value, 1f, 24f); RebuildVisual(); }
         public void SetCenterDotVisible(bool visible) { showCenterDot = visible; RebuildVisual(); }
-        public void SetCrosshairColor(Color color) { crosshairColor = color; RebuildVisual(); }
+        public void SetCrosshairColor(Color color)
+        {
+            crosshairColor = color;
+            if (_rootContainer == null) return;
+            foreach (var image in _rootContainer.GetComponentsInChildren<UnityEngine.UI.Image>(true)) image.color = color;
+        }
 
         public void RebuildVisual()
         {

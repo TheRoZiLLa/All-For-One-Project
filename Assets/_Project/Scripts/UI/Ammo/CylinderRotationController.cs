@@ -28,6 +28,7 @@ namespace Recorded.Weapons.Ammo
         private float _targetAngle = 0f;
         private Coroutine _rotationCoroutine;
         private bool _isRotating = false;
+        private float _reloadVisualAngle;
 
         public bool IsRotating => _isRotating;
         public float CurrentAngle => _currentAngle;
@@ -183,8 +184,14 @@ namespace Recorded.Weapons.Ammo
 
             if (rotatingInnerCylinder != null)
             {
-                rotatingInnerCylinder.localRotation = Quaternion.Euler(0f, 0f, zAngle);
+                rotatingInnerCylinder.localRotation = Quaternion.Euler(0f, 0f, zAngle + _reloadVisualAngle);
             }
+        }
+
+        public void SetReloadVisualAngle(float angle)
+        {
+            _reloadVisualAngle = angle;
+            ApplyVisualAngle(_currentAngle);
         }
 
         public void SetRotatingInnerCylinder(RectTransform rect)
