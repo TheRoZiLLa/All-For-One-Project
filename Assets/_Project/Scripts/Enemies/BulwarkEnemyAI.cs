@@ -1,4 +1,5 @@
 using Recorded.ColorSystem;
+using Recorded.Phase;
 using UnityEngine;
 
 namespace Recorded.Enemies
@@ -36,9 +37,11 @@ namespace Recorded.Enemies
         {
             if (_dead) return;
             if (_player == null && Camera.main != null) _player = Camera.main.transform;
-            if (_player == null || _body == null || _body.isKinematic) return;
+            Transform focus = HologramPresence.Resolve(_player);
+            HologramPresence.SteerAgent(this, focus);
+            if (focus == null || _body == null || _body.isKinematic) return;
 
-            Vector3 to = _player.position - transform.position;
+            Vector3 to = focus.position - transform.position;
             to.y = 0f;
             if (to.sqrMagnitude < 0.04f) return;
             float distance = to.magnitude;

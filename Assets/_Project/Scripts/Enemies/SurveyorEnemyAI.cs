@@ -1,3 +1,4 @@
+using Recorded.Phase;
 using UnityEngine;
 
 namespace Recorded.Enemies
@@ -52,6 +53,7 @@ namespace Recorded.Enemies
             if (playerTarget == null && Camera.main != null)
                 playerTarget = Camera.main.transform;
             CloseOnTarget();
+            HologramPresence.SteerAgent(this, Aggro());
 
             if (_phase == Phase.Observe)
             {
@@ -89,8 +91,9 @@ namespace Recorded.Enemies
 
         private void CloseOnTarget()
         {
-            if (_phase != Phase.Observe || _body == null || _body.isKinematic || playerTarget == null) return;
-            Vector3 to = playerTarget.position - transform.position;
+            Transform aim = Aggro();
+            if (_phase != Phase.Observe || _body == null || _body.isKinematic || aim == null) return;
+            Vector3 to = aim.position - transform.position;
             to.y = 0f;
             if (to.sqrMagnitude < 0.25f) return;
             float dist = to.magnitude;
@@ -111,10 +114,10 @@ namespace Recorded.Enemies
 
         private void ChoosePlan()
         {
-            Transform selected = IsUsable(hologramTarget) && (!IsUsable(playerTarget)
-                || Vector3.Distance(transform.position, hologramTarget.position) < Vector3.Distance(transform.position, playerTarget.position))
-                ? hologramTarget : playerTarget;
-            if (!IsUsable(selected)) return;
+            Transform selected = Aggro();
+            bool hologram = HologramPresence.IsLive;
+            if (selected == null) return;
+            if (!hologram && !IsUsable(selected)) return;
 
             Vector3 observed = selected.position;
             _targetVelocity = (observed - _lastTargetPosition) / Mathf.Max(observeSeconds, 0.01f);
@@ -173,6 +176,12 @@ namespace Recorded.Enemies
             telegraphBeam.position = (origin + target) * 0.5f;
             telegraphBeam.rotation = Quaternion.LookRotation(delta.normalized);
             telegraphBeam.localScale = new Vector3(0.055f, 0.045f, Mathf.Max(0.1f, delta.magnitude));
+        }
+
+        private Transform Aggro()
+        {
+            if (playerTarget == null && Camera.main != null) playerTarget = Camera.main.transform;
+            return HologramPresence.Resolve(playerTarget);
         }
 
         private bool IsUsable(Transform candidate) => candidate != null && candidate.gameObject.activeInHierarchy

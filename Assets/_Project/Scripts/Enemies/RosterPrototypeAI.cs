@@ -1,4 +1,5 @@
 using Recorded.ColorSystem;
+using Recorded.Phase;
 using UnityEngine;
 
 namespace Recorded.Enemies
@@ -63,6 +64,7 @@ namespace Recorded.Enemies
         {
             if (_dead || _body == null || _body.isKinematic) return;
             if (_player == null && Camera.main != null) _player = Camera.main.transform;
+            HologramPresence.SteerAgent(this, HologramPresence.Resolve(_player));
 
             if (kind == Kind.Drone || kind == Kind.Glint) Fly();
             else Walk();
@@ -70,8 +72,10 @@ namespace Recorded.Enemies
 
         private void Fly()
         {
+            Transform focus = HologramPresence.Resolve(_player);
             Vector3 home = kind == Kind.Glint ? _home + GlintOffset() : _home + DroneOffset();
-            if (_player != null && kind == Kind.Stalker) home = _player.position;
+            if (HologramPresence.IsLive && focus != null)
+                home = new Vector3(focus.position.x, hoverHeight, focus.position.z);
             Vector3 to = home - transform.position;
             Vector3 velocity = to * 1.6f;
             float vertical = hoverHeight - transform.position.y;
@@ -83,23 +87,12 @@ namespace Recorded.Enemies
             if (flat.sqrMagnitude > 0.05f) transform.rotation = Quaternion.LookRotation(flat.normalized);
         }
 
-        private Transform _hologram;
-        private float _hologramScan;
-
         private void Walk()
         {
-            Vector3 target = _player != null ? _player.position : _home;
-            if (kind == Kind.Stalker)
-            {
-                _hologramScan -= Time.deltaTime;
-                if (_hologramScan <= 0f)
-                {
-                    _hologram = FindHologram();
-                    _hologramScan = 0.5f;
-                }
-                if (_hologram != null) target = _hologram.position;
-                else target += StalkerWeave();
-            }
+            Transform focus = HologramPresence.Resolve(_player);
+            Vector3 target = focus != null ? focus.position : _home;
+            if (kind == Kind.Stalker && !HologramPresence.IsLive)
+                target += StalkerWeave();
 
             Vector3 to = target - transform.position;
             to.y = 0f;
@@ -137,17 +130,6 @@ namespace Recorded.Enemies
         private Vector3 StalkerWeave()
         {
             return new Vector3(Mathf.Sin(Time.time * 3.2f + _seed) * 3.5f, 0f, 0f);
-        }
-
-        private static Transform FindHologram()
-        {
-            foreach (Transform candidate in FindObjectsByType<Transform>(FindObjectsSortMode.None))
-            {
-                if (candidate.name.IndexOf("Hologram", System.StringComparison.OrdinalIgnoreCase) >= 0
-                    && candidate.gameObject.activeInHierarchy)
-                    return candidate;
-            }
-            return null;
         }
 
         public void PauseForColor() => enabled = false;
