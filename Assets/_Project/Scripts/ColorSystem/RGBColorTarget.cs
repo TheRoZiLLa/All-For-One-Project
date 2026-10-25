@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using UnityEngine;
 
 namespace Recorded.ColorSystem
@@ -102,6 +102,13 @@ namespace Recorded.ColorSystem
 
         private void Update()
         {
+            if (Recorded.Phase.PhaseRecorder.IsWorldPaused)
+            {
+                _expireRed += Time.deltaTime;
+                _expireGreen += Time.deltaTime;
+                _expireBlue += Time.deltaTime;
+                return;
+            }
             if (currentState == ObjectColorState.None) return;
 
             float now = Time.time;

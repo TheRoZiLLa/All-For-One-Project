@@ -29,6 +29,7 @@ namespace Recorded.ColorSystem
 
         private void LateUpdate()
         {
+            if (Recorded.Phase.PhaseRecorder.IsWorldPaused) return;
             if (!Application.isPlaying) return;
             if (transform.position.y >= fallDestroyY) return;
 

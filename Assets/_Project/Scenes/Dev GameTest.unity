@@ -1336,6 +1336,9 @@ MonoBehaviour:
   hologramPrefab: {fileID: 3131584985518320390, guid: 6f76734021f322645babbf7d29e92971, type: 3}
   maxRecordSeconds: 12
   holdAfterPlayback: 0.6
+  rewindSpeed: 4
+  worldHologramMaterial: {fileID: 2100000, guid: c3054844369f662468d892fb7e58993f, type: 2}
+  sanityRecoveryPerSecond: 0.08
 --- !u!1 &319090049
 GameObject:
   m_ObjectHideFlags: 0

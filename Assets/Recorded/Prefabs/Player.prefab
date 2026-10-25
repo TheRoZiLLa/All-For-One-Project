@@ -844,9 +844,12 @@ GameObject:
   - component: {fileID: 7358741970878383713}
   - component: {fileID: 4187579675786041990}
   - component: {fileID: 6475159217515815828}
+  - component: {fileID: 161162111854865583}
+  - component: {fileID: 946361116655001752}
+  - component: {fileID: -5137150698008129959}
   m_Layer: 0
   m_Name: Player
-  m_TagString: Untagged
+  m_TagString: Player
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -970,6 +973,53 @@ MonoBehaviour:
     AirImpulseDamping: 0.8
   cameraPivot: {fileID: 3678863462178626533}
   input: {fileID: 7358741970878383713}
+--- !u!114 &161162111854865583
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2365033716206032845}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 85a0c0c46bd6067498ed98657b584b5f, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Recorded.Phase.PhaseRecorder
+  hologramPrefab: {fileID: 3131584985518320390, guid: 6f76734021f322645babbf7d29e92971, type: 3}
+  maxRecordSeconds: 12
+  holdAfterPlayback: 0.6
+  rewindSpeed: 4
+  worldHologramMaterial: {fileID: 2100000, guid: c3054844369f662468d892fb7e58993f, type: 2}
+  sanityRecoveryPerSecond: 0.08
+--- !u!114 &946361116655001752
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2365033716206032845}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 27a95e970455c244e83964f59fd1c576, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Recorded.Phase.PhaseRecorderHUD
+--- !u!114 &-5137150698008129959
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2365033716206032845}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 000a424786e61964eb0bd65b3600a5d3, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Recorded.Player.PlayerHealth
+  maxHealth: 100
+  invulnerabilityDuration: 0.7
+  dodgeSpeed: 12
+  dodgeDuration: 0.28
+  dodgeCooldown: 1
 --- !u!1 &2373886330508053865
 GameObject:
   m_ObjectHideFlags: 0

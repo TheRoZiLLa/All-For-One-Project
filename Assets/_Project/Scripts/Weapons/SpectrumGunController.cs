@@ -29,7 +29,7 @@ namespace Recorded.Weapons
 
     /// <summary>
     /// Master controller for the RECORDED Spectrum Gun.
-    /// Manages fire rate, input handling, 6-chamber cylinder integration, first-person viewmodel
+    /// Manages fire rate, input handling, 8-chamber cylinder integration, first-person viewmodel
     /// ergonomics/recoil animation, and real-time color synchronization across Weapon Core, Crosshair, and VFX.
     /// </summary>
     public class SpectrumGunController : MonoBehaviour
@@ -44,7 +44,7 @@ namespace Recorded.Weapons
         private static readonly int FireTrigger = Animator.StringToHash("Fire");
         private static readonly int ReloadTrigger = Animator.StringToHash("Reload");
         public bool IsReloading => _isReloading;
-        public const float ReloadRefillPoint = 1.05f / 1.8f;
+        public const float ReloadRefillPoint = ReloadInsertionEnd;
         public const float ReloadInsertionStart = 0.40f;
         public const float ReloadInsertionEnd = 0.66f;
         public bool ReloadAmmoLoaded { get; private set; }
@@ -106,6 +106,8 @@ namespace Recorded.Weapons
         {
             ResolveDependencies();
             EnsureViewmodelAndMuzzleAlignment();
+            if (transform.Find("Barrel") != null && GetComponent<RevolverReloadPresentation>() == null)
+                gameObject.AddComponent<RevolverReloadPresentation>();
 
             if (ammoController != null)
             {
@@ -227,7 +229,8 @@ namespace Recorded.Weapons
             _reloadRoutine = null;
             _isReloading = false;
             ReloadAmmoLoaded = false;
-            if (shotAnimator != null && shotAnimator.isActiveAndEnabled && shotAnimator.isInitialized)
+            if (gameObject.activeInHierarchy && shotAnimator != null && shotAnimator.gameObject.activeInHierarchy
+                && shotAnimator.isActiveAndEnabled && shotAnimator.isInitialized)
             {
                 shotAnimator.ResetTrigger(FireTrigger);
                 shotAnimator.ResetTrigger(ReloadTrigger);
@@ -320,7 +323,9 @@ namespace Recorded.Weapons
                     }
                     else if (Keyboard.current.eKey.wasPressedThisFrame)
                     {
-                        rotationController.RotateRight();
+                        var body = GetComponentInParent<CharacterController>();
+                        var player = body != null ? body.transform : transform.root;
+                        if (!SecurityKioskEInteraction.HasInteractionFor(player)) rotationController.RotateRight();
                         return;
                     }
                 }
@@ -589,6 +594,7 @@ namespace Recorded.Weapons
         /// </summary>
         private void DeliverColorPayload(RaycastHit hitInfo, Ammo.AmmoType firedAmmo, ObjectColorState shotColorState, Vector3 shotDir)
         {
+            if (Recorded.Phase.PhaseRecorder.IsWorldPaused) return;
             if (hitInfo.collider == null) return;
 
             IColorShotImpact[] shotImpacts = hitInfo.collider.GetComponentsInParent<IColorShotImpact>();

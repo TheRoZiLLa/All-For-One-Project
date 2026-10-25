@@ -265,6 +265,7 @@ namespace Recorded.ColorSystem
 
         private void FixedUpdate()
         {
+            if (Recorded.Phase.PhaseRecorder.IsWorldPaused) return;
             if (_broken) return;
             if (_endpointA == null || _endpointB == null || !_endpointA.IsGreenBound || !_endpointB.IsGreenBound)
             {
@@ -278,6 +279,7 @@ namespace Recorded.ColorSystem
 
         private void LateUpdate()
         {
+            if (Recorded.Phase.PhaseRecorder.IsWorldPaused) return;
             if (_broken) return;
             RefreshBridge();
         }

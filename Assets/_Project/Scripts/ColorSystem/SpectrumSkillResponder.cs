@@ -580,6 +580,7 @@ namespace Recorded.ColorSystem
 
         private void Update()
         {
+            if (Recorded.Phase.PhaseRecorder.IsWorldPaused) return;
             TickSkillTimers(Time.deltaTime);
 
             if (_isBlueStasis)

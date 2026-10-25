@@ -62,6 +62,7 @@ namespace Recorded.Enemies
 
         private void Update()
         {
+            if (Recorded.Phase.PhaseRecorder.IsWorldPaused) return;
             if (_dead || _body == null || _body.isKinematic) return;
             if (_player == null && Camera.main != null) _player = Camera.main.transform;
             HologramPresence.SteerAgent(this, HologramPresence.Resolve(_player));

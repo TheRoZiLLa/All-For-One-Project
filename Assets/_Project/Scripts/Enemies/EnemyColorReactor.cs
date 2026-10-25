@@ -93,6 +93,7 @@ namespace Recorded.Enemies
 
         private void LateUpdate()
         {
+            if (Recorded.Phase.PhaseRecorder.IsWorldPaused) return;
             if (!_stateCheckPending || _dead) return;
             _stateCheckPending = false;
             if (_colors == null) return;
@@ -101,6 +102,7 @@ namespace Recorded.Enemies
 
         private void FixedUpdate()
         {
+            if (Recorded.Phase.PhaseRecorder.IsWorldPaused) return;
             if (_spawnLock > 0)
             {
                 _spawnLock--;
@@ -208,7 +210,7 @@ namespace Recorded.Enemies
 
         private IEnumerator FinishAfterKnockback()
         {
-            yield return new WaitForSeconds(FinisherDelay);
+            yield return Recorded.Phase.PhaseRecorder.WaitWorldSeconds(FinisherDelay);
             _finisherRoutine = null;
             if (!_dead) KillNow();
         }
@@ -238,7 +240,7 @@ namespace Recorded.Enemies
 
         private IEnumerator RespawnAfterDelay()
         {
-            yield return new WaitForSeconds(RespawnDelay);
+            yield return Recorded.Phase.PhaseRecorder.WaitWorldSeconds(RespawnDelay);
             _respawnRoutine = null;
             Respawn();
         }

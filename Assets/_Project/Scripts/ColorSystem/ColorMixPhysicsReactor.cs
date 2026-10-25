@@ -94,6 +94,7 @@ namespace Recorded.ColorSystem
 
         private void FixedUpdate()
         {
+            if (Recorded.Phase.PhaseRecorder.IsWorldPaused) return;
             if (!_cyanZeroG || _rb == null) return;
 
             _rb.useGravity = false;
@@ -239,7 +240,7 @@ namespace Recorded.ColorSystem
         private IEnumerator MagentaFuseRoutine()
         {
             float fuse = Mathf.Clamp(magentaFuseSeconds, 2f, 3f);
-            yield return new WaitForSeconds(fuse);
+            yield return Recorded.Phase.PhaseRecorder.WaitWorldSeconds(fuse);
 
             if (!_magentaArmed)
             {

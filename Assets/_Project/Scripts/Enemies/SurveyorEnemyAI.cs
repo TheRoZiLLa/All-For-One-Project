@@ -14,10 +14,10 @@ namespace Recorded.Enemies
         [SerializeField] private Transform telegraphBeam;
         [SerializeField] private Renderer telegraphRenderer;
         [SerializeField] private SurveyorBolt boltPrefab;
-        [SerializeField] private float observeSeconds = 1.2f;
+        [SerializeField] private float observeSeconds = 1.0f;
         [SerializeField] private float telegraphSeconds = 1.1f;
-        [SerializeField] private float recoverSeconds = 1.4f;
-        [SerializeField] private float attackRange = 15f;
+        [SerializeField] private float recoverSeconds = 1.2f;
+        [SerializeField] private float attackRange = 28f;
         [SerializeField] private float relocateDistance = 3f;
 
         private Rigidbody _body;
@@ -29,6 +29,7 @@ namespace Recorded.Enemies
         private int _sameLaneReads;
         private Vector3 _previousLane;
         private Phase _phase;
+        private bool _telegraphAudioPlayed;
 
         private void Awake()
         {
@@ -39,8 +40,13 @@ namespace Recorded.Enemies
 
         private void Start()
         {
-            if (playerTarget == null && Camera.main != null)
-                playerTarget = Camera.main.transform;
+            if (playerTarget == null)
+            {
+                if (Recorded.Player.PlayerHealth.LocalPlayer != null)
+                    playerTarget = Recorded.Player.PlayerHealth.LocalPlayer.transform;
+                else if (Camera.main != null)
+                    playerTarget = Camera.main.transform;
+            }
             if (hologramTarget == null)
                 hologramTarget = FindNamedTransform("Hologram");
             SetTelegraph(false, Vector3.zero);
@@ -49,9 +55,15 @@ namespace Recorded.Enemies
 
         private void Update()
         {
+            if (Recorded.Phase.PhaseRecorder.IsWorldPaused) return;
             if (_dead) return;
-            if (playerTarget == null && Camera.main != null)
-                playerTarget = Camera.main.transform;
+            if (playerTarget == null)
+            {
+                if (Recorded.Player.PlayerHealth.LocalPlayer != null)
+                    playerTarget = Recorded.Player.PlayerHealth.LocalPlayer.transform;
+                else if (Camera.main != null)
+                    playerTarget = Camera.main.transform;
+            }
             CloseOnTarget();
             HologramPresence.SteerAgent(this, Aggro());
 
@@ -127,11 +139,12 @@ namespace Recorded.Enemies
             _previousLane = lane;
             _target = selected;
 
-            // Repeatedly holding one lane makes the Surveyor predict a short lead; movement can invalidate it.
+            // Target lead prediction
             float lead = _sameLaneReads >= 2 ? 0.35f : 0f;
             _aimPoint = observed + Vector3.ClampMagnitude(_targetVelocity, 5f) * lead;
             _phase = Phase.Telegraph;
             _phaseTimer = telegraphSeconds;
+            _telegraphAudioPlayed = false;
         }
 
         private void ExecuteAttack()
@@ -139,7 +152,7 @@ namespace Recorded.Enemies
             SetTelegraph(false, Vector3.zero);
             if (IsUsable(_target) && Vector3.Distance(transform.position, _target.position) <= attackRange)
             {
-                Vector3 origin = transform.position + Vector3.up * 0.35f;
+                Vector3 origin = transform.position + transform.forward * 0.9f + Vector3.up * 0.35f;
                 Vector3 direction = (_aimPoint - origin).normalized;
                 if (direction.sqrMagnitude < 0.01f) direction = transform.forward;
                 SurveyorBolt bolt = boltPrefab != null
@@ -156,11 +169,12 @@ namespace Recorded.Enemies
             GameObject pulse = GameObject.CreatePrimitive(PrimitiveType.Sphere);
             pulse.name = "Surveyor_Pulse";
             pulse.transform.position = origin;
-            pulse.transform.localScale = Vector3.one * 0.28f;
+            pulse.transform.localScale = Vector3.one * 0.35f;
             SphereCollider sphere = pulse.GetComponent<SphereCollider>();
             sphere.isTrigger = true;
             Rigidbody pulseBody = pulse.AddComponent<Rigidbody>();
             pulseBody.isKinematic = true;
+            pulseBody.useGravity = false;
             SurveyorBolt bolt = pulse.AddComponent<SurveyorBolt>();
             return bolt;
         }
@@ -169,7 +183,18 @@ namespace Recorded.Enemies
         {
             if (telegraphBeam == null || telegraphRenderer == null) return;
             telegraphRenderer.enabled = visible;
-            if (!visible) return;
+            if (!visible)
+            {
+                _telegraphAudioPlayed = false;
+                return;
+            }
+
+            if (!_telegraphAudioPlayed)
+            {
+                _telegraphAudioPlayed = true;
+                PlayTelegraphAudio();
+            }
+
             Vector3 origin = transform.position + Vector3.up * 1.1f;
             Vector3 target = destination + Vector3.up * 0.8f;
             Vector3 delta = target - origin;
@@ -180,7 +205,13 @@ namespace Recorded.Enemies
 
         private Transform Aggro()
         {
-            if (playerTarget == null && Camera.main != null) playerTarget = Camera.main.transform;
+            if (playerTarget == null)
+            {
+                if (Recorded.Player.PlayerHealth.LocalPlayer != null)
+                    playerTarget = Recorded.Player.PlayerHealth.LocalPlayer.transform;
+                else if (Camera.main != null)
+                    playerTarget = Camera.main.transform;
+            }
             return HologramPresence.Resolve(playerTarget);
         }
 
@@ -221,6 +252,7 @@ namespace Recorded.Enemies
             _dead = true;
             enabled = false;
             SetTelegraph(false, Vector3.zero);
+            PlayExplosionAudio();
             var agent = GetComponent<UnityEngine.AI.NavMeshAgent>();
             if (agent != null) agent.enabled = false;
             if (_body != null)
@@ -238,6 +270,61 @@ namespace Recorded.Enemies
             _phase = Phase.Observe;
             _phaseTimer = 0f;
             SetTelegraph(false, Vector3.zero);
+        }
+
+        private void PlayTelegraphAudio()
+        {
+            int sampleRate = 44100;
+            float duration = 0.9f;
+            int numSamples = Mathf.FloorToInt(sampleRate * duration);
+            float[] samples = new float[numSamples];
+            for (int i = 0; i < numSamples; i++)
+            {
+                float t = (float)i / sampleRate;
+                float env = Mathf.Pow(t / duration, 1.5f); // Building up
+                float freq = Mathf.Lerp(440f, 1200f, t / duration);
+                float hum = Mathf.Sin(2f * Mathf.PI * freq * t) * 0.35f;
+                float flutter = Mathf.Sin(2f * Mathf.PI * (freq * 1.5f) * t) * 0.15f;
+                samples[i] = (hum + flutter) * env;
+            }
+            var clip = AudioClip.Create("Telegraph_Charge", numSamples, 1, sampleRate, false);
+            clip.SetData(samples, 0);
+
+            var audioObj = new GameObject("Telegraph_Sound");
+            audioObj.transform.position = transform.position;
+            var src = audioObj.AddComponent<AudioSource>();
+            src.spatialBlend = 0.5f;
+            src.volume = 0.75f;
+            src.clip = clip;
+            src.Play();
+            Destroy(audioObj, duration + 0.1f);
+        }
+
+        private void PlayExplosionAudio()
+        {
+            int sampleRate = 44100;
+            float duration = 0.8f;
+            int numSamples = Mathf.FloorToInt(sampleRate * duration);
+            float[] samples = new float[numSamples];
+            for (int i = 0; i < numSamples; i++)
+            {
+                float t = (float)i / sampleRate;
+                float env = Mathf.Exp(-3.5f * t / duration);
+                float boom = Mathf.Sin(2f * Mathf.PI * Mathf.Lerp(90f, 30f, t / duration) * t) * 0.7f;
+                float debris = (Random.value * 2f - 1f) * 0.5f;
+                samples[i] = (boom + debris) * env;
+            }
+            var clip = AudioClip.Create("Drone_Explode", numSamples, 1, sampleRate, false);
+            clip.SetData(samples, 0);
+
+            var audioObj = new GameObject("Explode_Sound");
+            audioObj.transform.position = transform.position;
+            var src = audioObj.AddComponent<AudioSource>();
+            src.spatialBlend = 0.4f;
+            src.volume = 0.95f;
+            src.clip = clip;
+            src.Play();
+            Destroy(audioObj, duration + 0.1f);
         }
 
         private bool _dead;

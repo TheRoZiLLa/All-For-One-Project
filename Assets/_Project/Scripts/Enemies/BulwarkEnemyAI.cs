@@ -35,6 +35,7 @@ namespace Recorded.Enemies
 
         private void Update()
         {
+            if (Recorded.Phase.PhaseRecorder.IsWorldPaused) return;
             if (_dead) return;
             if (_player == null && Camera.main != null) _player = Camera.main.transform;
             Transform focus = HologramPresence.Resolve(_player);
@@ -244,6 +245,7 @@ namespace Recorded.Enemies
 
         private void Update()
         {
+            if (Recorded.Phase.PhaseRecorder.IsWorldPaused) return;
             transform.position += _velocity * Time.deltaTime;
         }
     }

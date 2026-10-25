@@ -55,6 +55,7 @@ namespace Recorded.ColorSystem
 
         private void Update()
         {
+            if (Recorded.Phase.PhaseRecorder.IsWorldPaused) return;
             float dt = Time.deltaTime;
             if (dt <= 0f) return;
 

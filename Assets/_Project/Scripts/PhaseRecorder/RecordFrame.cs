@@ -16,5 +16,6 @@ namespace Recorded.Phase
         public ObjectColorState Color;
         public Vector3 AimOrigin;
         public Vector3 AimDirection;
+        public KioskCyanAirlockGate Kiosk;
     }
 }

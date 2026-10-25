@@ -207,5 +207,15 @@ namespace Recorded.Weapons.Ammo
             rotatingInnerCylinder = rect;
             ApplyVisualAngle(_currentAngle);
         }
+
+        public void SyncToActiveChamber()
+        {
+            if (_rotationCoroutine != null) StopCoroutine(_rotationCoroutine);
+            _rotationCoroutine = null;
+            _isRotating = false;
+            _currentAngle = _targetAngle = ammoController != null ? ammoController.ActiveChamberIndex * ChamberAngleStep : 0f;
+            _reloadVisualAngle = 0f;
+            ApplyVisualAngle(_currentAngle);
+        }
     }
 }
